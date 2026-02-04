@@ -65,6 +65,7 @@ let hasUnsavedChanges = false;
 
 // Canvas and context
 let canvas, ctx;
+let overlayCanvas, overlayCtx;
 let viewport;
 let overviewCanvas, overviewCtx;
 let overviewViewport;
@@ -79,6 +80,7 @@ function init() {
     // Cache DOM elements
     elements = {
         canvas: document.getElementById('canvas'),
+        overlayCanvas: document.getElementById('overlay-canvas'),
         canvasViewport: document.getElementById('canvas-viewport'),
         canvasContainer: document.getElementById('canvas-container'),
         welcomeMessage: document.getElementById('welcome-message'),
@@ -120,6 +122,8 @@ function init() {
 
     canvas = elements.canvas;
     ctx = canvas.getContext('2d');
+    overlayCanvas = elements.overlayCanvas;
+    overlayCtx = overlayCanvas.getContext('2d');
     viewport = elements.canvasViewport;
     overviewCanvas = elements.overviewCanvas;
     overviewCtx = overviewCanvas.getContext('2d');
@@ -1039,38 +1043,65 @@ function handleCanvasMouseMove(e) {
 
     render();
 
+    // Draw selection on overlay (crisp at any zoom)
     if (currentMode === Mode.SELECT) {
-        if (selectionType === 'rect') {
-            // Draw selection rectangle
-            const x = Math.min(dragStart.x, dragEnd.x);
-            const y = Math.min(dragStart.y, dragEnd.y);
-            const w = Math.abs(dragEnd.x - dragStart.x);
-            const h = Math.abs(dragEnd.y - dragStart.y);
+        drawSelectionOnOverlay(coords);
+    }
+}
 
-            ctx.strokeStyle = '#0078d4';
-            ctx.lineWidth = 2 / zoom;
-            ctx.setLineDash([5 / zoom, 5 / zoom]);
-            ctx.strokeRect(x, y, w, h);
-            ctx.setLineDash([]);
-        } else if (selectionType === 'lasso' && lassoPoints.length > 1) {
-            // Draw lasso path
-            ctx.strokeStyle = '#0078d4';
-            ctx.lineWidth = 2 / zoom;
-            ctx.setLineDash([5 / zoom, 5 / zoom]);
-            ctx.beginPath();
-            ctx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
-            for (let i = 1; i < lassoPoints.length; i++) {
-                ctx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
-            }
-            ctx.lineTo(coords.x, coords.y);
-            ctx.closePath();
-            ctx.stroke();
-            ctx.setLineDash([]);
+function drawSelectionOnOverlay(currentCoords) {
+    if (!currentImage) return;
 
-            // Fill with semi-transparent
-            ctx.fillStyle = 'rgba(0, 120, 212, 0.1)';
-            ctx.fill();
+    // Get screen transform values
+    const vp = elements.canvasViewport;
+    const viewWidth = vp.clientWidth || elements.canvasContainer.clientWidth;
+    const viewHeight = vp.clientHeight || elements.canvasContainer.clientHeight;
+    const imgWidth = currentImage.width * zoom;
+    const imgHeight = currentImage.height * zoom;
+    const imgLeft = (viewWidth - imgWidth) / 2 + panX;
+    const imgTop = (viewHeight - imgHeight) / 2 + panY;
+
+    // Convert image coords to screen coords
+    const toScreen = (imgX, imgY) => ({
+        x: imgLeft + imgX * zoom,
+        y: imgTop + imgY * zoom
+    });
+
+    if (selectionType === 'rect') {
+        const start = toScreen(dragStart.x, dragStart.y);
+        const end = toScreen(dragEnd.x, dragEnd.y);
+        const x = Math.min(start.x, end.x);
+        const y = Math.min(start.y, end.y);
+        const w = Math.abs(end.x - start.x);
+        const h = Math.abs(end.y - start.y);
+
+        overlayCtx.strokeStyle = '#0078d4';
+        overlayCtx.lineWidth = 2;
+        overlayCtx.setLineDash([5, 5]);
+        overlayCtx.strokeRect(x, y, w, h);
+        overlayCtx.setLineDash([]);
+    } else if (selectionType === 'lasso' && lassoPoints.length > 1) {
+        overlayCtx.strokeStyle = '#0078d4';
+        overlayCtx.lineWidth = 2;
+        overlayCtx.setLineDash([5, 5]);
+        overlayCtx.beginPath();
+
+        const first = toScreen(lassoPoints[0].x, lassoPoints[0].y);
+        overlayCtx.moveTo(first.x, first.y);
+
+        for (let i = 1; i < lassoPoints.length; i++) {
+            const pt = toScreen(lassoPoints[i].x, lassoPoints[i].y);
+            overlayCtx.lineTo(pt.x, pt.y);
         }
+
+        const current = toScreen(currentCoords.x, currentCoords.y);
+        overlayCtx.lineTo(current.x, current.y);
+        overlayCtx.closePath();
+        overlayCtx.stroke();
+        overlayCtx.setLineDash([]);
+
+        overlayCtx.fillStyle = 'rgba(0, 120, 212, 0.1)';
+        overlayCtx.fill();
     }
 }
 
@@ -1282,23 +1313,13 @@ async function handleKeyDown(e) {
 function render() {
     if (!currentImage) return;
 
-    // Clear canvas
+    // Clear main canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Draw image
     ctx.drawImage(currentImage, 0, 0);
 
-    // Draw marker bounding box guide (field rectangle)
-    drawMarkerBoundingBox();
-
-    // Draw markers (scale radius inversely with zoom for consistent visual size)
-    const markerScale = Math.max(0.5, Math.min(2, 1 / zoom));
-    markers.forEach(marker => {
-        drawMarker(marker, markerScale);
-    });
-
     // Update canvas transform for zoom/pan
-    // Use the viewport element, fallback to container if needed
     const vp = elements.canvasViewport;
     const viewWidth = vp.clientWidth || elements.canvasContainer.clientWidth;
     const viewHeight = vp.clientHeight || elements.canvasContainer.clientHeight;
@@ -1311,37 +1332,41 @@ function render() {
     canvas.style.transform = `scale(${zoom})`;
     canvas.style.left = left + 'px';
     canvas.style.top = top + 'px';
+
+    // Render markers on overlay canvas (at screen resolution)
+    renderOverlayMarkers(viewWidth, viewHeight, left, top);
 }
 
-function drawMarker(marker, scale = 1) {
-    const x = marker.x;
-    const y = marker.y;
-    const r = MARKER_RADIUS * scale;
-    const t = MARKER_THICKNESS * scale;
+function renderOverlayMarkers(viewWidth, viewHeight, imgLeft, imgTop) {
+    // Resize overlay to match viewport (account for device pixel ratio for crisp rendering)
+    const dpr = window.devicePixelRatio || 1;
+    overlayCanvas.width = viewWidth * dpr;
+    overlayCanvas.height = viewHeight * dpr;
+    overlayCanvas.style.width = viewWidth + 'px';
+    overlayCanvas.style.height = viewHeight + 'px';
+    overlayCtx.scale(dpr, dpr);
 
-    if (marker.selected) {
-        ctx.fillStyle = '#ffb6c1';
-        drawCross(x, y, r + 2 * scale, t + 2 * scale);
-    }
+    // Clear overlay
+    overlayCtx.clearRect(0, 0, viewWidth, viewHeight);
 
-    ctx.fillStyle = marker.marker_class === MarkerClass.POSITIVE ? '#4caf50' : '#f44336';
-    drawCross(x, y, r, t);
+    // Draw marker bounding box guide on overlay
+    drawGuideOnOverlay(imgLeft, imgTop);
+
+    // Draw each marker at screen coordinates
+    markers.forEach(marker => {
+        // Convert image coordinates to screen coordinates
+        const screenX = imgLeft + marker.x * zoom;
+        const screenY = imgTop + marker.y * zoom;
+
+        drawMarkerOnOverlay(marker, screenX, screenY);
+    });
 }
 
-function drawCross(x, y, l, t) {
-    const halfT = t / 2;
-
-    ctx.beginPath();
-    ctx.rect(x - halfT, y - l, t, l * 2);
-    ctx.rect(x - l, y - halfT, l * 2, t);
-    ctx.fill();
-}
-
-function drawMarkerBoundingBox() {
+function drawGuideOnOverlay(imgLeft, imgTop) {
     if (!showGuide || markers.length < 2) return;
 
     // Calculate bounding box with tight padding
-    const padding = 8; // Tight padding around markers
+    const padding = 8;
     let minX = Infinity, minY = Infinity;
     let maxX = -Infinity, maxY = -Infinity;
 
@@ -1352,60 +1377,80 @@ function drawMarkerBoundingBox() {
         maxY = Math.max(maxY, m.y);
     });
 
-    // Add padding
-    minX -= padding;
-    minY -= padding;
-    maxX += padding;
-    maxY += padding;
+    // Add padding and clamp to image bounds
+    minX = Math.max(0, minX - padding);
+    minY = Math.max(0, minY - padding);
+    maxX = Math.min(currentImage.width, maxX + padding);
+    maxY = Math.min(currentImage.height, maxY + padding);
 
-    // Clamp to image bounds
-    minX = Math.max(0, minX);
-    minY = Math.max(0, minY);
-    maxX = Math.min(currentImage.width, maxX);
-    maxY = Math.min(currentImage.height, maxY);
-
-    const width = maxX - minX;
-    const height = maxY - minY;
+    // Convert to screen coordinates
+    const screenMinX = imgLeft + minX * zoom;
+    const screenMinY = imgTop + minY * zoom;
+    const screenMaxX = imgLeft + maxX * zoom;
+    const screenMaxY = imgTop + maxY * zoom;
+    const width = screenMaxX - screenMinX;
+    const height = screenMaxY - screenMinY;
 
     // Draw dashed rectangle
-    ctx.strokeStyle = '#ffd700'; // Gold color
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 3]);
-    ctx.strokeRect(minX, minY, width, height);
-    ctx.setLineDash([]);
+    overlayCtx.strokeStyle = '#ffd700';
+    overlayCtx.lineWidth = 2;
+    overlayCtx.setLineDash([6, 3]);
+    overlayCtx.strokeRect(screenMinX, screenMinY, width, height);
+    overlayCtx.setLineDash([]);
 
     // Draw corner brackets for emphasis
     const bracketSize = Math.min(15, width / 5, height / 5);
-    ctx.strokeStyle = '#ffd700';
-    ctx.lineWidth = 2;
+    overlayCtx.strokeStyle = '#ffd700';
+    overlayCtx.lineWidth = 2;
 
     // Top-left bracket
-    ctx.beginPath();
-    ctx.moveTo(minX, minY + bracketSize);
-    ctx.lineTo(minX, minY);
-    ctx.lineTo(minX + bracketSize, minY);
-    ctx.stroke();
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(screenMinX, screenMinY + bracketSize);
+    overlayCtx.lineTo(screenMinX, screenMinY);
+    overlayCtx.lineTo(screenMinX + bracketSize, screenMinY);
+    overlayCtx.stroke();
 
     // Top-right bracket
-    ctx.beginPath();
-    ctx.moveTo(maxX - bracketSize, minY);
-    ctx.lineTo(maxX, minY);
-    ctx.lineTo(maxX, minY + bracketSize);
-    ctx.stroke();
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(screenMaxX - bracketSize, screenMinY);
+    overlayCtx.lineTo(screenMaxX, screenMinY);
+    overlayCtx.lineTo(screenMaxX, screenMinY + bracketSize);
+    overlayCtx.stroke();
 
     // Bottom-left bracket
-    ctx.beginPath();
-    ctx.moveTo(minX, maxY - bracketSize);
-    ctx.lineTo(minX, maxY);
-    ctx.lineTo(minX + bracketSize, maxY);
-    ctx.stroke();
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(screenMinX, screenMaxY - bracketSize);
+    overlayCtx.lineTo(screenMinX, screenMaxY);
+    overlayCtx.lineTo(screenMinX + bracketSize, screenMaxY);
+    overlayCtx.stroke();
 
     // Bottom-right bracket
-    ctx.beginPath();
-    ctx.moveTo(maxX - bracketSize, maxY);
-    ctx.lineTo(maxX, maxY);
-    ctx.lineTo(maxX, maxY - bracketSize);
-    ctx.stroke();
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(screenMaxX - bracketSize, screenMaxY);
+    overlayCtx.lineTo(screenMaxX, screenMaxY);
+    overlayCtx.lineTo(screenMaxX, screenMaxY - bracketSize);
+    overlayCtx.stroke();
+}
+
+function drawMarkerOnOverlay(marker, screenX, screenY) {
+    const r = MARKER_RADIUS;
+    const t = MARKER_THICKNESS;
+
+    if (marker.selected) {
+        overlayCtx.fillStyle = '#ffd700';
+        drawCrossOnOverlay(screenX, screenY, r + 3, t + 3);
+    }
+
+    overlayCtx.fillStyle = marker.marker_class === MarkerClass.POSITIVE ? '#4caf50' : '#f44336';
+    drawCrossOnOverlay(screenX, screenY, r, t);
+}
+
+function drawCrossOnOverlay(x, y, l, t) {
+    const halfT = t / 2;
+    overlayCtx.beginPath();
+    overlayCtx.rect(x - halfT, y - l, t, l * 2);
+    overlayCtx.rect(x - l, y - halfT, l * 2, t);
+    overlayCtx.fill();
 }
 
 // ============== UI Updates ==============

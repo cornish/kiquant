@@ -14,7 +14,7 @@ from PIL import Image
 
 from marker_state import State, Field, Marker, MarkerClass, Mode
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 # Initialize Eel with the web folder
 eel.init('web')
@@ -663,7 +663,8 @@ def show_about():
         f"kiQuant v{__version__}\n\n"
         "Cell marker quantification tool for\n"
         "immunohistochemistry analysis.\n\n"
-        "https://github.com/your-username/kiquant"
+        "Copyright (c) 2025-2026 Toby Cornish\n\n"
+        "https://github.com/cornish/kiquant"
     )
     root.destroy()
 

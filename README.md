@@ -18,7 +18,7 @@ kiQuant provides a simple interface for manually counting positive and negative 
 
 ### From Release (Recommended)
 
-Download `kiQuant.exe` from the [Releases](https://github.com/your-username/kiquant/releases) page. No installation required - just run the executable.
+Download `kiQuant.exe` from the [Releases](https://github.com/cornish/kiquant/releases) page. No installation required - just run the executable.
 
 ### From Source
 
@@ -26,7 +26,7 @@ Requires Python 3.11+
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/kiquant.git
+git clone https://github.com/cornish/kiquant.git
 cd kiquant
 
 # Run setup script
