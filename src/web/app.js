@@ -86,6 +86,7 @@ function init() {
         countPositive: document.getElementById('count-positive'),
         countNegative: document.getElementById('count-negative'),
         countTotal: document.getElementById('count-total'),
+        countPi: document.getElementById('count-pi'),
         statusFilename: document.getElementById('status-filename'),
         statusMode: document.getElementById('status-mode'),
         statusSummary: document.getElementById('status-summary'),
@@ -1416,7 +1417,15 @@ function updateProgress(current, total) {
 function updateCounts(positive, negative) {
     elements.countPositive.textContent = positive;
     elements.countNegative.textContent = negative;
-    elements.countTotal.textContent = positive + negative;
+    const total = positive + negative;
+    elements.countTotal.textContent = total;
+    // Calculate proliferation index to 1 decimal place
+    if (total > 0) {
+        const pi = (positive / total * 100).toFixed(1);
+        elements.countPi.textContent = pi + '%';
+    } else {
+        elements.countPi.textContent = '-';
+    }
 }
 
 async function updateSummary() {

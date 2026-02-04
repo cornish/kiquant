@@ -201,7 +201,7 @@ class State:
             'positive': total_pos,
             'negative': total_neg,
             'total': total,
-            'proliferation_index': round(pi, 2)
+            'proliferation_index': round(pi, 1)
         }
 
     def to_dict(self) -> dict:

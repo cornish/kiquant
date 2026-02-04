@@ -218,6 +218,10 @@ body {
     color: #90caf9;
 }
 
+.pi-count {
+    color: #ffd700;
+}
+
 /* Canvas Container */
 #canvas-container {
     flex: 1;

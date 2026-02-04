@@ -14,7 +14,7 @@ from PIL import Image
 
 from marker_state import State, Field, Marker, MarkerClass, Mode
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 # Initialize Eel with the web folder
 eel.init('web')
