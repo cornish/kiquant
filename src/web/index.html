@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>kiQuant</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Top Toolbar -->
+        <div id="toolbar">
+            <!-- File Menu Dropdown -->
+            <div class="toolbar-group dropdown-group">
+                <button id="btn-file" class="toolbar-btn dropdown-trigger" title="File Menu">File</button>
+                <div id="file-menu" class="dropdown-menu hidden">
+                    <div class="dropdown-item" data-action="new">New Project</div>
+                    <div class="dropdown-item" data-action="load">Load Project</div>
+                    <div class="dropdown-item" data-action="quick">Quick Mode</div>
+                    <div class="dropdown-separator"></div>
+                    <div class="dropdown-item" data-action="save">Save Project</div>
+                    <div class="dropdown-item" data-action="export">Export CSV</div>
+                    <div class="dropdown-separator"></div>
+                    <div class="dropdown-item" data-action="about">About kiQuant</div>
+                </div>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
+            <div class="toolbar-group">
+                <button id="btn-undo" class="toolbar-btn" title="Undo (Ctrl+Z)" disabled>Undo</button>
+                <button id="btn-redo" class="toolbar-btn" title="Redo (Ctrl+Y)" disabled>Redo</button>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
+            <div class="toolbar-group mode-buttons">
+                <button id="btn-positive" class="mode-btn active" data-mode="0" title="Positive Marker (P)">
+                    <span class="marker-icon positive">+</span> Positive
+                </button>
+                <button id="btn-negative" class="mode-btn" data-mode="1" title="Negative Marker (N)">
+                    <span class="marker-icon negative">-</span> Negative
+                </button>
+                <div class="mode-btn-group">
+                    <button id="btn-select" class="mode-btn" data-mode="2" title="Select Mode (S)">
+                        Select
+                    </button>
+                    <button id="btn-select-dropdown" class="mode-btn-dropdown" title="Selection Type">▾</button>
+                    <div id="select-menu" class="dropdown-menu select-dropdown hidden">
+                        <div class="dropdown-item" data-select-type="rect">Rectangle Select</div>
+                        <div class="dropdown-item" data-select-type="lasso">Lasso Select</div>
+                    </div>
+                </div>
+                <button id="btn-eraser" class="mode-btn" data-mode="3" title="Eraser Mode (E)">
+                    Eraser
+                </button>
+                <button id="btn-pan" class="mode-btn" data-mode="4" title="Pan Mode (H)">
+                    Pan
+                </button>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
+            <div class="toolbar-group nav-group">
+                <button id="btn-prev" class="nav-btn" title="Previous Image (Left Arrow)">&lt;</button>
+                <span id="progress">0 / 0</span>
+                <button id="btn-next" class="nav-btn" title="Next Image (Right Arrow)">&gt;</button>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
+            <div class="toolbar-group counts">
+                <span class="count positive-count">Pos: <span id="count-positive">0</span></span>
+                <span class="count negative-count">Neg: <span id="count-negative">0</span></span>
+                <span class="count total-count">Total: <span id="count-total">0</span></span>
+            </div>
+        </div>
+
+        <!-- Main Canvas Area -->
+        <div id="canvas-container">
+            <div id="welcome-message">
+                <h2>kiQuant</h2>
+                <p>Cell marker quantification tool</p>
+                <div class="welcome-buttons">
+                    <button id="welcome-new" class="welcome-btn">New Project</button>
+                    <button id="welcome-load" class="welcome-btn">Load Project</button>
+                    <button id="welcome-quick" class="welcome-btn welcome-btn-secondary">Quick Mode</button>
+                </div>
+            </div>
+            <div id="canvas-viewport">
+                <canvas id="canvas"></canvas>
+            </div>
+
+            <!-- Overview Map -->
+            <div id="overview-panel" class="hidden">
+                <canvas id="overview-canvas"></canvas>
+                <div id="overview-viewport"></div>
+            </div>
+
+            <!-- Zoom Controls -->
+            <div id="zoom-controls" class="hidden">
+                <button id="btn-zoom-in" class="zoom-btn" title="Zoom In (+)">+</button>
+                <span id="zoom-level">100%</span>
+                <button id="btn-zoom-out" class="zoom-btn" title="Zoom Out (-)">-</button>
+                <button id="btn-zoom-fit" class="zoom-btn zoom-btn-text" title="Fit to Window (F)">Fit</button>
+                <button id="btn-zoom-100" class="zoom-btn zoom-btn-text" title="Actual Size (1)">1:1</button>
+                <span class="zoom-separator">|</span>
+                <button id="btn-toggle-guide" class="zoom-btn zoom-btn-text" title="Toggle Field Guide (G)">Guide</button>
+            </div>
+        </div>
+
+        <!-- Context Menu -->
+        <div id="context-menu" class="context-menu hidden">
+            <div class="context-menu-item" data-action="mode-positive"><span class="menu-icon positive">+</span> Positive Mode</div>
+            <div class="context-menu-item" data-action="mode-negative"><span class="menu-icon negative">-</span> Negative Mode</div>
+            <div class="context-menu-item" data-action="mode-pan"><span class="menu-icon pan">&#9995;</span> Pan Mode</div>
+            <div class="context-menu-separator"></div>
+            <div class="context-menu-item" data-action="select-all">Select All</div>
+            <div class="context-menu-item" data-action="deselect-all">Deselect All</div>
+            <div class="context-menu-separator"></div>
+            <div class="context-menu-item" data-action="change-positive">Change to Positive</div>
+            <div class="context-menu-item" data-action="change-negative">Change to Negative</div>
+            <div class="context-menu-item" data-action="delete-selected">Delete Selected</div>
+        </div>
+
+        <!-- Status Bar -->
+        <div id="status-bar">
+            <span id="status-filename">No image loaded</span>
+            <span id="status-mode">Mode: Positive</span>
+            <span id="status-summary"></span>
+        </div>
+    </div>
+
+    <script src="/eel.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

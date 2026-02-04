@@ -1,0 +1,4 @@
+eel>=0.16.0
+Pillow>=10.0.0
+bottle-websocket>=0.2.9
+pyinstaller>=6.0.0

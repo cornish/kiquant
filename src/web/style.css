@@ -1,0 +1,552 @@
+/* kiQuant Styles */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    font-size: 14px;
+    background-color: #1e1e1e;
+    color: #e0e0e0;
+    height: 100vh;
+    overflow: hidden;
+    user-select: none;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* Toolbar */
+#toolbar {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    background-color: #2d2d2d;
+    border-bottom: 1px solid #404040;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Dropdown Menu */
+.dropdown-group {
+    position: relative;
+}
+
+.dropdown-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    background-color: #2d2d2d;
+    border: 1px solid #505050;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    min-width: 150px;
+    z-index: 1000;
+    padding: 4px 0;
+}
+
+.dropdown-menu.hidden {
+    display: none;
+}
+
+.dropdown-item {
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #e0e0e0;
+}
+
+.dropdown-item:hover {
+    background-color: #0078d4;
+}
+
+.dropdown-separator {
+    height: 1px;
+    background-color: #404040;
+    margin: 4px 0;
+}
+
+.toolbar-separator {
+    width: 1px;
+    height: 28px;
+    background-color: #404040;
+    margin: 0 8px;
+}
+
+.toolbar-btn, .mode-btn, .nav-btn {
+    padding: 6px 12px;
+    border: 1px solid #505050;
+    border-radius: 4px;
+    background-color: #3c3c3c;
+    color: #e0e0e0;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s ease;
+}
+
+.toolbar-btn:hover, .mode-btn:hover, .nav-btn:hover {
+    background-color: #4a4a4a;
+    border-color: #606060;
+}
+
+.toolbar-btn:active, .mode-btn:active, .nav-btn:active {
+    background-color: #505050;
+}
+
+.mode-btn.active {
+    background-color: #0078d4;
+    border-color: #0078d4;
+    color: white;
+}
+
+.mode-btn.active:hover {
+    background-color: #1084d8;
+}
+
+/* Mode button group with dropdown */
+.mode-btn-group {
+    display: flex;
+    position: relative;
+}
+
+.mode-btn-group .mode-btn {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    border-right: none;
+}
+
+.mode-btn-dropdown {
+    padding: 6px 6px;
+    border: 1px solid #505050;
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    background-color: #3c3c3c;
+    color: #e0e0e0;
+    cursor: pointer;
+    font-size: 10px;
+}
+
+.mode-btn-dropdown:hover {
+    background-color: #4a4a4a;
+}
+
+.mode-btn-group .mode-btn.active + .mode-btn-dropdown {
+    background-color: #0066b8;
+    border-color: #0078d4;
+    color: white;
+}
+
+.select-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+}
+
+.select-dropdown .dropdown-item.active {
+    background-color: #3a3a3a;
+}
+
+.select-dropdown .dropdown-item.active::before {
+    content: '\2713 ';
+}
+
+.marker-icon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    line-height: 14px;
+    text-align: center;
+    border-radius: 2px;
+    font-weight: bold;
+    margin-right: 4px;
+}
+
+.marker-icon.positive {
+    background-color: #4caf50;
+    color: white;
+}
+
+.marker-icon.negative {
+    background-color: #f44336;
+    color: white;
+}
+
+.nav-btn {
+    width: 36px;
+    font-weight: bold;
+}
+
+#progress {
+    min-width: 60px;
+    text-align: center;
+    font-weight: 500;
+}
+
+.counts {
+    gap: 12px;
+}
+
+.count {
+    font-weight: 500;
+}
+
+.positive-count {
+    color: #4caf50;
+}
+
+.negative-count {
+    color: #f44336;
+}
+
+.total-count {
+    color: #90caf9;
+}
+
+/* Canvas Container */
+#canvas-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #1a1a1a;
+    overflow: hidden;
+    position: relative;
+}
+
+#canvas-viewport {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    overflow: hidden;
+    display: none;
+}
+
+#canvas-viewport.loaded {
+    display: block;
+}
+
+#canvas {
+    display: block;
+    position: absolute;
+    transform-origin: 0 0;
+    cursor: crosshair;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* Overview Map Panel */
+#overview-panel {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    background-color: #2d2d2d;
+    border: 2px solid #505050;
+    border-radius: 4px;
+    padding: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    z-index: 100;
+}
+
+#overview-panel.hidden {
+    display: none;
+}
+
+#overview-canvas {
+    display: block;
+    max-width: 200px;
+    max-height: 150px;
+}
+
+#overview-viewport {
+    position: absolute;
+    border: 2px solid #0078d4;
+    background-color: rgba(0, 120, 212, 0.15);
+    pointer-events: none;
+    box-sizing: border-box;
+}
+
+/* Zoom Controls */
+#zoom-controls {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background-color: #2d2d2d;
+    border: 1px solid #505050;
+    border-radius: 4px;
+    padding: 6px 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    z-index: 100;
+}
+
+#zoom-controls.hidden {
+    display: none;
+}
+
+.zoom-btn {
+    width: 28px;
+    height: 28px;
+    border: 1px solid #505050;
+    border-radius: 4px;
+    background-color: #3c3c3c;
+    color: #e0e0e0;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.zoom-btn:hover {
+    background-color: #4a4a4a;
+    border-color: #606060;
+}
+
+.zoom-btn-text {
+    width: auto;
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+#zoom-level {
+    min-width: 50px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 500;
+    color: #e0e0e0;
+}
+
+.zoom-separator {
+    color: #505050;
+    margin: 0 4px;
+}
+
+.zoom-btn.guide-active {
+    background-color: #0078d4;
+    border-color: #0078d4;
+    color: white;
+}
+
+/* Pan mode and panning cursor */
+#canvas.mode-pan {
+    cursor: grab;
+}
+
+#canvas.mode-pan:active,
+#canvas.panning {
+    cursor: grabbing;
+}
+
+/* Welcome Message */
+#welcome-message {
+    text-align: center;
+    color: #888;
+}
+
+#welcome-message h2 {
+    font-size: 28px;
+    margin-bottom: 12px;
+    color: #aaa;
+}
+
+#welcome-message p {
+    margin-bottom: 24px;
+}
+
+.welcome-buttons {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+}
+
+.welcome-btn {
+    padding: 12px 24px;
+    font-size: 16px;
+    border: 2px solid #0078d4;
+    border-radius: 6px;
+    background-color: transparent;
+    color: #0078d4;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.welcome-btn:hover {
+    background-color: #0078d4;
+    color: white;
+}
+
+#welcome-message.hidden {
+    display: none;
+}
+
+/* Status Bar */
+#status-bar {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    background-color: #007acc;
+    color: white;
+    font-size: 12px;
+    gap: 20px;
+    flex-shrink: 0;
+}
+
+#status-filename {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#status-mode {
+    font-weight: 500;
+}
+
+#status-summary {
+    font-weight: 500;
+}
+
+/* Cursor styles for different modes */
+#canvas.mode-positive {
+    cursor: crosshair;
+}
+
+#canvas.mode-negative {
+    cursor: crosshair;
+}
+
+#canvas.mode-select {
+    cursor: default;
+}
+
+/* Custom eraser cursor - circle with X */
+#canvas.mode-eraser {
+    cursor: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="%23ff6b6b" stroke-width="2"/><line x1="7" y1="7" x2="17" y2="17" stroke="%23ff6b6b" stroke-width="2"/><line x1="17" y1="7" x2="7" y2="17" stroke="%23ff6b6b" stroke-width="2"/></svg>') 12 12, crosshair;
+}
+
+/* Context Menu */
+.context-menu {
+    position: fixed;
+    background-color: #2d2d2d;
+    border: 1px solid #505050;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    min-width: 160px;
+    z-index: 1000;
+    padding: 4px 0;
+    /* Start off-screen to prevent flash */
+    left: -9999px;
+    top: -9999px;
+}
+
+.context-menu.hidden {
+    display: none !important;
+    visibility: hidden;
+}
+
+.context-menu-item {
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #e0e0e0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.context-menu-item:hover {
+    background-color: #0078d4;
+}
+
+.context-menu-item.active {
+    background-color: #3a3a3a;
+    font-weight: 500;
+}
+
+.context-menu-item.active::after {
+    content: '\2713';
+    margin-left: auto;
+}
+
+.menu-icon {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    line-height: 14px;
+    text-align: center;
+    border-radius: 2px;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+.menu-icon.positive {
+    background-color: #4caf50;
+    color: white;
+}
+
+.menu-icon.negative {
+    background-color: #f44336;
+    color: white;
+}
+
+.menu-icon.pan {
+    background-color: #607d8b;
+    color: white;
+    font-size: 10px;
+}
+
+.context-menu-item.disabled {
+    color: #666;
+    cursor: not-allowed;
+}
+
+.context-menu-item.disabled:hover {
+    background-color: transparent;
+}
+
+.context-menu-separator {
+    height: 1px;
+    background-color: #404040;
+    margin: 4px 0;
+}
+
+/* Quick mode button */
+.welcome-btn-secondary {
+    border-color: #606060;
+    color: #aaa;
+}
+
+.welcome-btn-secondary:hover {
+    background-color: #606060;
+    border-color: #606060;
+    color: white;
+}
+
+/* Disabled state */
+.toolbar-btn:disabled, .mode-btn:disabled, .nav-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Selection rectangle (drawn on canvas via JS) */

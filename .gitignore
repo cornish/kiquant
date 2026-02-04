@@ -1,0 +1,39 @@
+# Virtual environment
+src/venv/
+venv/
+
+# PyInstaller
+src/build/
+src/dist/
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project files (user data)
+*.json
+!package.json
+
+# Test images
+*.tif
+*.tiff
+*.jpg
+*.jpeg
+*.png
+*.bmp
