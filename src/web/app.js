@@ -122,7 +122,18 @@ function init() {
         aboutVersion: document.getElementById('about-version'),
         aboutCopyright: document.querySelector('.about-copyright'),
         aboutLink: document.getElementById('about-link'),
-        aboutClose: document.getElementById('about-close')
+        aboutClose: document.getElementById('about-close'),
+        // Detection elements
+        detectionGroup: document.getElementById('detection-group'),
+        detectModel: document.getElementById('detect-model'),
+        detectClassify: document.getElementById('detect-classify'),
+        thresholdContainer: document.getElementById('threshold-container'),
+        dabThreshold: document.getElementById('dab-threshold'),
+        thresholdValue: document.getElementById('threshold-value'),
+        btnDetect: document.getElementById('btn-detect'),
+        detectionProgress: document.getElementById('detection-progress'),
+        detectionProgressBar: document.getElementById('detection-progress-bar'),
+        detectionProgressText: document.getElementById('detection-progress-text')
     };
 
     canvas = elements.canvas;
@@ -140,6 +151,9 @@ function init() {
     // Initial UI state
     updateModeUI();
     elements.btnToggleGuide.classList.toggle('guide-active', showGuide);
+
+    // Initialize detection controls
+    initDetection();
 }
 
 function bindEvents() {
@@ -234,6 +248,11 @@ function bindEvents() {
         e.preventDefault();
         eel.open_url('https://github.com/cornish/kiquant')();
     });
+
+    // Detection controls
+    elements.btnDetect.addEventListener('click', handleDetect);
+    elements.detectClassify.addEventListener('change', handleClassifyModeChange);
+    elements.dabThreshold.addEventListener('input', handleThresholdChange);
 }
 
 async function showAboutModal() {
@@ -344,6 +363,8 @@ function hideWelcome() {
     viewport.classList.add('loaded');
     elements.overviewPanel.classList.remove('hidden');
     elements.zoomControls.classList.remove('hidden');
+    // Update detection button state now that project is loaded
+    updateDetectionButtonState();
 }
 
 // ============== File Menu ==============
@@ -1285,6 +1306,11 @@ async function handleKeyDown(e) {
         case 'g':
             toggleGuide();
             break;
+        case 'd':
+            if (isProjectLoaded && detectionAvailable) {
+                handleDetect();
+            }
+            break;
         case 'f':
             if (isProjectLoaded) zoomToFit();
             break;
@@ -1507,4 +1533,125 @@ async function updateSummary() {
     } else {
         elements.statusSummary.textContent = '';
     }
+}
+
+// ============== Detection Functions ==============
+
+let detectionAvailable = false;
+
+async function initDetection() {
+    try {
+        const availability = await eel.get_detection_availability()();
+
+        detectionAvailable = availability.available;
+
+        // Populate model dropdown
+        const modelSelect = elements.detectModel;
+        modelSelect.innerHTML = '';
+
+        if (availability.models.length === 0) {
+            const option = document.createElement('option');
+            option.value = '';
+            option.disabled = true;
+            option.selected = true;
+            option.textContent = 'No AI models';
+            modelSelect.appendChild(option);
+            modelSelect.disabled = true;
+        } else {
+            availability.models.forEach((model, index) => {
+                const option = document.createElement('option');
+                option.value = model.id;
+                option.textContent = model.name;
+                if (index === 0) option.selected = true;
+                modelSelect.appendChild(option);
+            });
+            modelSelect.disabled = false;
+        }
+
+        // Update button state
+        updateDetectionButtonState();
+
+        // Show/hide threshold based on classify mode
+        handleClassifyModeChange();
+
+    } catch (error) {
+        console.error('Failed to initialize detection:', error);
+        detectionAvailable = false;
+        elements.detectModel.disabled = true;
+        elements.btnDetect.disabled = true;
+    }
+}
+
+function updateDetectionButtonState() {
+    const modelSelected = elements.detectModel.value && elements.detectModel.value !== '';
+    elements.btnDetect.disabled = !detectionAvailable || !modelSelected || !isProjectLoaded;
+}
+
+function handleClassifyModeChange() {
+    const classifyMode = elements.detectClassify.value;
+    // Show threshold slider only in auto mode
+    if (classifyMode === 'auto') {
+        elements.thresholdContainer.style.display = 'flex';
+    } else {
+        elements.thresholdContainer.style.display = 'none';
+    }
+}
+
+function handleThresholdChange() {
+    const value = elements.dabThreshold.value;
+    elements.thresholdValue.textContent = value + '%';
+}
+
+async function handleDetect() {
+    if (!isProjectLoaded || !detectionAvailable) return;
+
+    const modelName = elements.detectModel.value;
+    const classifyMode = elements.detectClassify.value;
+    const threshold = parseInt(elements.dabThreshold.value) / 100;
+
+    if (!modelName) {
+        alert('Please select a detection model.');
+        return;
+    }
+
+    // Show progress modal
+    showDetectionProgress();
+
+    try {
+        const result = await eel.detect_nuclei(modelName, classifyMode, threshold)();
+
+        hideDetectionProgress();
+
+        if (result.success) {
+            markers = result.markers;
+            updateCounts(result.positive_count, result.negative_count);
+            updateUndoRedoButtons(result.can_undo, result.can_redo);
+            markUnsavedChanges();
+            render();
+            renderOverview();
+            updateSummary();
+        } else {
+            alert('Detection failed: ' + result.message);
+        }
+    } catch (error) {
+        hideDetectionProgress();
+        alert('Detection error: ' + error.message);
+    }
+}
+
+function showDetectionProgress() {
+    elements.detectionProgress.classList.remove('hidden');
+    elements.detectionProgressBar.style.width = '0%';
+    elements.detectionProgressText.textContent = 'Initializing...';
+}
+
+function hideDetectionProgress() {
+    elements.detectionProgress.classList.add('hidden');
+}
+
+// Expose progress callback for Python to call
+eel.expose(onDetectionProgress);
+function onDetectionProgress(message, progress) {
+    elements.detectionProgressText.textContent = message;
+    elements.detectionProgressBar.style.width = (progress * 100) + '%';
 }

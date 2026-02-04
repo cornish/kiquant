@@ -61,6 +61,25 @@
 
             <div class="toolbar-separator"></div>
 
+            <!-- Detection Controls -->
+            <div class="toolbar-group detection-group" id="detection-group">
+                <select id="detect-model" class="toolbar-select" title="Detection Model">
+                    <option value="" disabled selected>No AI models</option>
+                </select>
+                <select id="detect-classify" class="toolbar-select" title="Classification Mode">
+                    <option value="auto">Auto (DAB)</option>
+                    <option value="all_positive">All Positive</option>
+                    <option value="all_negative">All Negative</option>
+                </select>
+                <div id="threshold-container" class="threshold-container">
+                    <input type="range" id="dab-threshold" class="threshold-slider" min="0" max="100" value="30" title="DAB Threshold">
+                    <span id="threshold-value" class="threshold-value">30%</span>
+                </div>
+                <button id="btn-detect" class="detect-btn" title="Run Detection (D)" disabled>Detect</button>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
             <div class="toolbar-group nav-group">
                 <button id="btn-prev" class="nav-btn" title="Previous Image (Left Arrow)">&lt;</button>
                 <span id="progress">0 / 0</span>
@@ -153,6 +172,17 @@
                 <p class="about-copyright"></p>
                 <p><a href="#" id="about-link">github.com/cornish/kiquant</a></p>
                 <button id="about-close" class="modal-close">OK</button>
+            </div>
+        </div>
+
+        <!-- Detection Progress Modal -->
+        <div id="detection-progress" class="detection-progress hidden">
+            <div class="detection-progress-content">
+                <div class="detection-progress-spinner"></div>
+                <div id="detection-progress-bar-container">
+                    <div id="detection-progress-bar"></div>
+                </div>
+                <span id="detection-progress-text">Detecting...</span>
             </div>
         </div>
 

@@ -2,3 +2,10 @@ eel>=0.16.0
 Pillow>=10.0.0
 bottle-websocket>=0.2.9
 pyinstaller>=6.0.0
+numpy>=1.24.0
+
+# Optional AI detection dependencies (install separately if needed)
+# cellpose>=3.0.0
+# stardist>=0.8.0
+# tensorflow>=2.10.0
+# scikit-image>=0.21.0

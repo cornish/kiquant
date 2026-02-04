@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-02-04
+
+### Added
+- AI-powered nucleus detection using CellPose and StarDist (optional)
+- Automatic DAB-based classification of detected nuclei (positive/negative)
+- Detection controls in toolbar (model selector, classification mode, DAB threshold)
+- Progress modal with real-time feedback during detection
+- Keyboard shortcut D for running detection
+- H-DAB color deconvolution for stain separation
+
+### Changed
+- Updated README with comprehensive AI setup instructions
+- Added numpy as required dependency
+
 ## [0.1.4] - 2025-02-03
 
 ### Added

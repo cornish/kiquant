@@ -30,10 +30,16 @@ Thumbs.db
 *.json
 !package.json
 
-# Test images
+# User images (don't commit random images)
 *.tif
 *.tiff
 *.jpg
 *.jpeg
 *.png
 *.bmp
+
+# But include test images and resources
+!test_images/
+!test_images/*
+!src/resources/
+!src/resources/*

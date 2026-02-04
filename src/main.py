@@ -11,10 +11,17 @@ import json
 from io import BytesIO
 from tkinter import Tk, filedialog, messagebox
 from PIL import Image
+import numpy as np
 
 from marker_state import State, Field, Marker, MarkerClass, Mode
+from detection import (
+    is_detection_available,
+    is_cellpose_available,
+    is_stardist_available,
+    get_available_models
+)
 
-__version__ = "0.1.4"
+__version__ = "0.2.0"
 
 # Initialize Eel with the web folder
 eel.init('web')
@@ -659,6 +666,133 @@ def open_url(url: str):
     """Open a URL in the default browser."""
     import webbrowser
     webbrowser.open(url)
+
+
+# ============== Detection Functions ==============
+
+@eel.expose
+def get_detection_availability():
+    """
+    Get information about available detection models.
+
+    Returns:
+        Dict with:
+        - available: bool, whether any detection is available
+        - cellpose: bool, whether CellPose is installed
+        - stardist: bool, whether StarDist is installed
+        - models: list of {id, name} for available models
+    """
+    return {
+        'available': is_detection_available(),
+        'cellpose': is_cellpose_available(),
+        'stardist': is_stardist_available(),
+        'models': get_available_models()
+    }
+
+
+@eel.expose
+def detect_nuclei(model_name, classify_mode='auto', dab_threshold=0.3):
+    """
+    Run nucleus detection on the current image.
+
+    Args:
+        model_name: 'cellpose' or 'stardist'
+        classify_mode: 'auto' (DAB threshold), 'all_positive', or 'all_negative'
+        dab_threshold: 0.0-1.0 threshold for auto classification
+
+    Returns:
+        Dict with success status and updated marker data.
+    """
+    field = state.get_current_field()
+    if not field:
+        return {'success': False, 'message': 'No image loaded'}
+
+    try:
+        # Progress callback for frontend updates
+        def progress_callback(message, progress):
+            eel.onDetectionProgress(message, progress)()
+
+        progress_callback("Loading image...", 0.0)
+
+        # Load image as numpy array
+        img = Image.open(field.filepath)
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        image_array = np.array(img)
+
+        # Save current markers to undo history
+        _save_to_history()
+
+        progress_callback("Initializing detector...", 0.05)
+
+        # Get detector and run detection
+        from detection.detector import DetectorFactory
+        detector = DetectorFactory.get_detector(model_name)
+
+        nuclei = detector.detect(image_array, progress_callback)
+
+        if not nuclei:
+            return {
+                'success': True,
+                'message': 'No nuclei detected',
+                'markers': [],
+                'positive_count': 0,
+                'negative_count': 0,
+                'can_undo': len(_get_field_history(state.current_index)['undo']) > 0,
+                'can_redo': len(_get_field_history(state.current_index)['redo']) > 0
+            }
+
+        progress_callback("Classifying markers...", 0.9)
+
+        # Classify nuclei
+        if classify_mode == 'auto':
+            from detection.color_deconv import separate_stains, classify_by_dab_intensity
+
+            _, dab_channel = separate_stains(image_array)
+            centroids = [(n.x, n.y) for n in nuclei]
+            classifications = classify_by_dab_intensity(
+                dab_channel, centroids, threshold=dab_threshold
+            )
+        elif classify_mode == 'all_positive':
+            classifications = [True] * len(nuclei)
+        else:  # all_negative
+            classifications = [False] * len(nuclei)
+
+        # Clear existing markers and create new ones
+        field.markers.clear()
+
+        for nucleus, is_positive in zip(nuclei, classifications):
+            marker_class = MarkerClass.POSITIVE if is_positive else MarkerClass.NEGATIVE
+            marker = Marker(
+                marker_class=marker_class,
+                x=nucleus.x,
+                y=nucleus.y,
+                selected=False
+            )
+            field.markers.append(marker)
+
+        progress_callback(f"Detected {len(nuclei)} nuclei", 1.0)
+
+        return {
+            'success': True,
+            'message': f'Detected {len(nuclei)} nuclei',
+            'markers': [m.to_dict() for m in field.markers],
+            'positive_count': field.get_positive_count(),
+            'negative_count': field.get_negative_count(),
+            'can_undo': len(_get_field_history(state.current_index)['undo']) > 0,
+            'can_redo': len(_get_field_history(state.current_index)['redo']) > 0
+        }
+
+    except ImportError as e:
+        return {
+            'success': False,
+            'message': f'Detection library not installed: {str(e)}'
+        }
+    except Exception as e:
+        return {
+            'success': False,
+            'message': f'Detection failed: {str(e)}'
+        }
 
 
 # ============== Main Entry Point ==============
