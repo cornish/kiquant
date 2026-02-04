@@ -741,6 +741,121 @@ body {
     border-color: #555;
 }
 
+.detect-settings-btn {
+    padding: 6px 10px;
+    border: 1px solid #505050;
+    border-radius: 4px;
+    background-color: #3c3c3c;
+    color: #e0e0e0;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.detect-settings-btn:hover:not(:disabled) {
+    background-color: #4a4a4a;
+    border-color: #606060;
+}
+
+.detect-settings-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Detection Settings Modal */
+.settings-modal {
+    min-width: 360px;
+    max-width: 420px;
+    text-align: left;
+}
+
+.settings-modal h2 {
+    text-align: center;
+    margin-bottom: 16px;
+}
+
+.settings-section {
+    margin-bottom: 16px;
+    padding: 12px;
+    background-color: #252525;
+    border-radius: 6px;
+}
+
+.settings-section h3 {
+    font-size: 13px;
+    color: #aaa;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.setting-row {
+    margin-bottom: 12px;
+}
+
+.setting-row:last-child {
+    margin-bottom: 0;
+}
+
+.setting-row label {
+    display: block;
+    font-size: 13px;
+    color: #e0e0e0;
+    margin-bottom: 4px;
+}
+
+.setting-row input[type="number"] {
+    width: 80px;
+    padding: 6px 8px;
+    border: 1px solid #505050;
+    border-radius: 4px;
+    background-color: #3c3c3c;
+    color: #e0e0e0;
+    font-size: 13px;
+}
+
+.setting-row input[type="range"] {
+    width: 180px;
+    vertical-align: middle;
+}
+
+.setting-value {
+    display: inline-block;
+    min-width: 40px;
+    text-align: right;
+    font-size: 13px;
+    color: #e0e0e0;
+    margin-left: 8px;
+}
+
+.setting-hint {
+    display: block;
+    font-size: 11px;
+    color: #888;
+    margin-top: 2px;
+}
+
+.modal-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.modal-btn-secondary {
+    padding: 8px 16px;
+    background-color: #3c3c3c;
+    color: #e0e0e0;
+    border: 1px solid #505050;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.modal-btn-secondary:hover {
+    background-color: #4a4a4a;
+}
+
 /* Detection Progress Modal */
 .detection-progress {
     position: fixed;

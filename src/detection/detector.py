@@ -42,7 +42,8 @@ class BaseDetector(ABC):
     def detect(
         self,
         image: np.ndarray,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        settings: Optional[dict] = None
     ) -> List[DetectedNucleus]:
         """
         Detect nuclei in the image.
@@ -51,6 +52,7 @@ class BaseDetector(ABC):
             image: RGB image as numpy array (H, W, 3) with dtype uint8.
             progress_callback: Optional callback for progress updates.
                               Called with (message: str, progress: float 0-1)
+            settings: Optional dict with algorithm parameters.
 
         Returns:
             List of DetectedNucleus objects with centroid coordinates.

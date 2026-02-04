@@ -54,7 +54,8 @@ class StarDistDetector(BaseDetector):
     def detect(
         self,
         image: np.ndarray,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        settings: Optional[dict] = None
     ) -> List[DetectedNucleus]:
         """
         Detect nuclei using StarDist.
@@ -62,10 +63,14 @@ class StarDistDetector(BaseDetector):
         Args:
             image: RGB image as numpy array (H, W, 3) with dtype uint8.
             progress_callback: Optional callback for progress updates.
+            settings: Optional dict with 'prob_thresh', 'nms_thresh'.
 
         Returns:
             List of DetectedNucleus objects.
         """
+        if settings is None:
+            settings = {}
+
         if self._model is None:
             self.load_model(progress_callback)
 
@@ -87,11 +92,15 @@ class StarDistDetector(BaseDetector):
         if progress_callback:
             progress_callback("Predicting instances...", 0.3)
 
+        # Get parameters from settings
+        prob_thresh = settings.get('prob_thresh', 0.5)
+        nms_thresh = settings.get('nms_thresh', 0.3)
+
         # Run prediction
         labels, details = self._model.predict_instances(
             gray,
-            prob_thresh=0.5,
-            nms_thresh=0.4
+            prob_thresh=prob_thresh,
+            nms_thresh=nms_thresh
         )
 
         if progress_callback:

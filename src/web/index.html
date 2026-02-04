@@ -76,6 +76,7 @@
                     <span id="threshold-value" class="threshold-value">30%</span>
                 </div>
                 <button id="btn-detect" class="detect-btn" title="Run Detection (D)" disabled>Detect</button>
+                <button id="btn-detect-settings" class="detect-settings-btn" title="Detection Settings" disabled>&#9881;</button>
             </div>
 
             <div class="toolbar-separator"></div>
@@ -172,6 +173,55 @@
                 <p class="about-copyright"></p>
                 <p><a href="#" id="about-link">github.com/cornish/kiquant</a></p>
                 <button id="about-close" class="modal-close">OK</button>
+            </div>
+        </div>
+
+        <!-- Detection Settings Modal -->
+        <div id="detection-settings-modal" class="modal hidden">
+            <div class="modal-content settings-modal">
+                <h2>Detection Settings</h2>
+
+                <div class="settings-section" id="cellpose-settings">
+                    <h3>CellPose Settings</h3>
+                    <div class="setting-row">
+                        <label for="setting-diameter">Nucleus Diameter (pixels)</label>
+                        <input type="number" id="setting-diameter" min="0" max="200" value="0" step="1">
+                        <span class="setting-hint">0 = auto-detect</span>
+                    </div>
+                    <div class="setting-row">
+                        <label for="setting-cellprob">Cell Probability Threshold</label>
+                        <input type="range" id="setting-cellprob" min="-6" max="6" value="0" step="0.5">
+                        <span id="setting-cellprob-value" class="setting-value">0.0</span>
+                        <span class="setting-hint">Lower = more cells detected</span>
+                    </div>
+                    <div class="setting-row">
+                        <label for="setting-flow">Flow Threshold</label>
+                        <input type="range" id="setting-flow" min="0" max="1" value="0.4" step="0.05">
+                        <span id="setting-flow-value" class="setting-value">0.4</span>
+                        <span class="setting-hint">Lower = more permissive</span>
+                    </div>
+                </div>
+
+                <div class="settings-section" id="stardist-settings">
+                    <h3>StarDist Settings</h3>
+                    <div class="setting-row">
+                        <label for="setting-prob">Probability Threshold</label>
+                        <input type="range" id="setting-prob" min="0.1" max="0.9" value="0.5" step="0.05">
+                        <span id="setting-prob-value" class="setting-value">0.5</span>
+                        <span class="setting-hint">Lower = more cells detected</span>
+                    </div>
+                    <div class="setting-row">
+                        <label for="setting-nms">NMS Threshold</label>
+                        <input type="range" id="setting-nms" min="0.1" max="0.9" value="0.3" step="0.05">
+                        <span id="setting-nms-value" class="setting-value">0.3</span>
+                        <span class="setting-hint">Overlap threshold</span>
+                    </div>
+                </div>
+
+                <div class="modal-buttons">
+                    <button id="settings-reset" class="modal-btn-secondary">Reset Defaults</button>
+                    <button id="settings-close" class="modal-close">OK</button>
+                </div>
             </div>
         </div>
 

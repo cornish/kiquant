@@ -41,7 +41,8 @@ class CellPoseDetector(BaseDetector):
     def detect(
         self,
         image: np.ndarray,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        settings: Optional[dict] = None
     ) -> List[DetectedNucleus]:
         """
         Detect nuclei using CellPose.
@@ -49,10 +50,14 @@ class CellPoseDetector(BaseDetector):
         Args:
             image: RGB image as numpy array (H, W, 3) with dtype uint8.
             progress_callback: Optional callback for progress updates.
+            settings: Optional dict with 'diameter', 'cellprob_threshold', 'flow_threshold'.
 
         Returns:
             List of DetectedNucleus objects.
         """
+        if settings is None:
+            settings = {}
+
         if self._model is None:
             self.load_model(progress_callback)
 
@@ -65,14 +70,22 @@ class CellPoseDetector(BaseDetector):
         else:
             gray = image
 
+        # Get parameters from settings
+        diameter = settings.get('diameter', 0)
+        if diameter == 0:
+            diameter = None  # Auto-estimate
+
+        cellprob_threshold = settings.get('cellprob_threshold', 0.0)
+        flow_threshold = settings.get('flow_threshold', 0.4)
+
         # Run segmentation (CellPose 3.x API)
         # channels=[0, 0] means grayscale input
         masks, flows, styles, diams = self._model.eval(
             gray,
-            diameter=None,  # Auto-estimate
+            diameter=diameter,
             channels=[0, 0],
-            flow_threshold=0.4,
-            cellprob_threshold=0.0
+            flow_threshold=flow_threshold,
+            cellprob_threshold=cellprob_threshold
         )
 
         if progress_callback:

@@ -133,7 +133,23 @@ function init() {
         btnDetect: document.getElementById('btn-detect'),
         detectionProgress: document.getElementById('detection-progress'),
         detectionProgressBar: document.getElementById('detection-progress-bar'),
-        detectionProgressText: document.getElementById('detection-progress-text')
+        detectionProgressText: document.getElementById('detection-progress-text'),
+        // Detection settings elements
+        btnDetectSettings: document.getElementById('btn-detect-settings'),
+        detectionSettingsModal: document.getElementById('detection-settings-modal'),
+        settingDiameter: document.getElementById('setting-diameter'),
+        settingCellprob: document.getElementById('setting-cellprob'),
+        settingCellprobValue: document.getElementById('setting-cellprob-value'),
+        settingFlow: document.getElementById('setting-flow'),
+        settingFlowValue: document.getElementById('setting-flow-value'),
+        settingProb: document.getElementById('setting-prob'),
+        settingProbValue: document.getElementById('setting-prob-value'),
+        settingNms: document.getElementById('setting-nms'),
+        settingNmsValue: document.getElementById('setting-nms-value'),
+        cellposeSettings: document.getElementById('cellpose-settings'),
+        stardistSettings: document.getElementById('stardist-settings'),
+        settingsReset: document.getElementById('settings-reset'),
+        settingsClose: document.getElementById('settings-close')
     };
 
     canvas = elements.canvas;
@@ -253,6 +269,29 @@ function bindEvents() {
     elements.btnDetect.addEventListener('click', handleDetect);
     elements.detectClassify.addEventListener('change', handleClassifyModeChange);
     elements.dabThreshold.addEventListener('input', handleThresholdChange);
+
+    // Detection settings
+    elements.btnDetectSettings.addEventListener('click', showDetectionSettings);
+    elements.settingsClose.addEventListener('click', hideDetectionSettings);
+    elements.settingsReset.addEventListener('click', resetDetectionSettings);
+    elements.detectionSettingsModal.addEventListener('click', (e) => {
+        if (e.target === elements.detectionSettingsModal) hideDetectionSettings();
+    });
+    elements.detectModel.addEventListener('change', updateSettingsVisibility);
+
+    // Settings sliders
+    elements.settingCellprob.addEventListener('input', () => {
+        elements.settingCellprobValue.textContent = parseFloat(elements.settingCellprob.value).toFixed(1);
+    });
+    elements.settingFlow.addEventListener('input', () => {
+        elements.settingFlowValue.textContent = parseFloat(elements.settingFlow.value).toFixed(2);
+    });
+    elements.settingProb.addEventListener('input', () => {
+        elements.settingProbValue.textContent = parseFloat(elements.settingProb.value).toFixed(2);
+    });
+    elements.settingNms.addEventListener('input', () => {
+        elements.settingNmsValue.textContent = parseFloat(elements.settingNms.value).toFixed(2);
+    });
 }
 
 async function showAboutModal() {
@@ -1585,6 +1624,49 @@ async function initDetection() {
 function updateDetectionButtonState() {
     const modelSelected = elements.detectModel.value && elements.detectModel.value !== '';
     elements.btnDetect.disabled = !detectionAvailable || !modelSelected || !isProjectLoaded;
+    elements.btnDetectSettings.disabled = !detectionAvailable || !modelSelected;
+}
+
+function showDetectionSettings() {
+    updateSettingsVisibility();
+    elements.detectionSettingsModal.classList.remove('hidden');
+}
+
+function hideDetectionSettings() {
+    elements.detectionSettingsModal.classList.add('hidden');
+}
+
+function updateSettingsVisibility() {
+    const model = elements.detectModel.value;
+    elements.cellposeSettings.style.display = (model === 'cellpose') ? 'block' : 'none';
+    elements.stardistSettings.style.display = (model === 'stardist') ? 'block' : 'none';
+}
+
+function resetDetectionSettings() {
+    // General
+    elements.settingDiameter.value = 0;
+
+    // CellPose
+    elements.settingCellprob.value = 0;
+    elements.settingCellprobValue.textContent = '0.0';
+    elements.settingFlow.value = 0.4;
+    elements.settingFlowValue.textContent = '0.40';
+
+    // StarDist
+    elements.settingProb.value = 0.5;
+    elements.settingProbValue.textContent = '0.50';
+    elements.settingNms.value = 0.3;
+    elements.settingNmsValue.textContent = '0.30';
+}
+
+function getDetectionSettings() {
+    return {
+        diameter: parseInt(elements.settingDiameter.value) || 0,
+        cellprob_threshold: parseFloat(elements.settingCellprob.value),
+        flow_threshold: parseFloat(elements.settingFlow.value),
+        prob_thresh: parseFloat(elements.settingProb.value),
+        nms_thresh: parseFloat(elements.settingNms.value)
+    };
 }
 
 function handleClassifyModeChange() {
@@ -1608,6 +1690,7 @@ async function handleDetect() {
     const modelName = elements.detectModel.value;
     const classifyMode = elements.detectClassify.value;
     const threshold = parseInt(elements.dabThreshold.value) / 100;
+    const settings = getDetectionSettings();
 
     if (!modelName) {
         alert('Please select a detection model.');
@@ -1618,7 +1701,7 @@ async function handleDetect() {
     showDetectionProgress();
 
     try {
-        const result = await eel.detect_nuclei(modelName, classifyMode, threshold)();
+        const result = await eel.detect_nuclei(modelName, classifyMode, threshold, settings)();
 
         hideDetectionProgress();
 
