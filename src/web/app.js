@@ -117,7 +117,12 @@ function init() {
         btnZoom100: document.getElementById('btn-zoom-100'),
         btnToggleGuide: document.getElementById('btn-toggle-guide'),
         btnSelectDropdown: document.getElementById('btn-select-dropdown'),
-        selectMenu: document.getElementById('select-menu')
+        selectMenu: document.getElementById('select-menu'),
+        aboutModal: document.getElementById('about-modal'),
+        aboutVersion: document.getElementById('about-version'),
+        aboutCopyright: document.querySelector('.about-copyright'),
+        aboutLink: document.getElementById('about-link'),
+        aboutClose: document.getElementById('about-close')
     };
 
     canvas = elements.canvas;
@@ -219,6 +224,27 @@ function bindEvents() {
 
     // Warn before closing with unsaved changes
     window.addEventListener('beforeunload', handleBeforeUnload);
+
+    // About modal
+    elements.aboutClose.addEventListener('click', hideAboutModal);
+    elements.aboutModal.addEventListener('click', (e) => {
+        if (e.target === elements.aboutModal) hideAboutModal();
+    });
+    elements.aboutLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        eel.open_url('https://github.com/cornish/kiquant')();
+    });
+}
+
+async function showAboutModal() {
+    const version = await eel.get_version()();
+    elements.aboutVersion.textContent = `Version ${version}`;
+    elements.aboutCopyright.textContent = 'Copyright © 2025-2026 Toby Cornish';
+    elements.aboutModal.classList.remove('hidden');
+}
+
+function hideAboutModal() {
+    elements.aboutModal.classList.add('hidden');
 }
 
 function handleBeforeUnload(e) {
@@ -355,7 +381,7 @@ async function handleFileMenuAction(e) {
             handleExportCSV();
             break;
         case 'about':
-            eel.show_about()();
+            showAboutModal();
             break;
     }
 }

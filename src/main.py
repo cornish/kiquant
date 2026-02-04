@@ -14,7 +14,7 @@ from PIL import Image
 
 from marker_state import State, Field, Marker, MarkerClass, Mode
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 # Initialize Eel with the web folder
 eel.init('web')
@@ -650,23 +650,15 @@ def is_quick_mode():
 
 @eel.expose
 def get_version():
-    """Get application version."""
+    """Return the application version."""
     return __version__
 
 
 @eel.expose
-def show_about():
-    """Show about dialog."""
-    root = _hide_tk_root()
-    messagebox.showinfo(
-        "About kiQuant",
-        f"kiQuant v{__version__}\n\n"
-        "Cell marker quantification tool for\n"
-        "immunohistochemistry analysis.\n\n"
-        "Copyright (c) 2025-2026 Toby Cornish\n\n"
-        "https://github.com/cornish/kiquant"
-    )
-    root.destroy()
+def open_url(url: str):
+    """Open a URL in the default browser."""
+    import webbrowser
+    webbrowser.open(url)
 
 
 # ============== Main Entry Point ==============
