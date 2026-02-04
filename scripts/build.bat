@@ -7,6 +7,7 @@ call venv\Scripts\activate.bat
 echo Running PyInstaller...
 pyinstaller --noconfirm --onefile --windowed ^
     --name "kiQuant" ^
+    --icon "resources\icon.ico" ^
     --add-data "web;web" ^
     --hidden-import "bottle_websocket" ^
     main.py
