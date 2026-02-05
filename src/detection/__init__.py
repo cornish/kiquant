@@ -1,11 +1,12 @@
 """
 Detection module for kiQuant.
-Provides nucleus detection using CellPose and StarDist deep learning models.
+Provides nucleus detection using KiNet, CellPose, and StarDist deep learning models.
 """
 
 # Check for available detection libraries
 _cellpose_available = False
 _stardist_available = False
+_kinet_available = False
 
 try:
     import cellpose
@@ -16,6 +17,12 @@ except ImportError:
 try:
     import stardist
     _stardist_available = True
+except ImportError:
+    pass
+
+try:
+    import torch
+    _kinet_available = True
 except ImportError:
     pass
 
@@ -30,9 +37,14 @@ def is_stardist_available() -> bool:
     return _stardist_available
 
 
+def is_kinet_available() -> bool:
+    """Check if KiNet (PyTorch) is available."""
+    return _kinet_available
+
+
 def is_detection_available() -> bool:
     """Check if any detection model is available."""
-    return _cellpose_available or _stardist_available
+    return _cellpose_available or _stardist_available or _kinet_available
 
 
 def get_available_models() -> list:
@@ -43,6 +55,13 @@ def get_available_models() -> list:
         List of dicts with 'id' and 'name' keys for each available model.
     """
     models = []
+
+    # KiNet first - it's specifically designed for Ki-67 IHC
+    if _kinet_available:
+        models.append({
+            'id': 'kinet',
+            'name': 'KiNet (Ki-67 IHC)'
+        })
 
     if _cellpose_available:
         models.append({

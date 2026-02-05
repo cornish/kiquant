@@ -14,6 +14,7 @@ class DetectedNucleus:
     x: int
     y: int
     confidence: float = 1.0
+    marker_class: Optional[int] = None  # 0=positive, 1=negative, None=unclassified
 
 
 class BaseDetector(ABC):
@@ -87,7 +88,10 @@ class DetectorFactory:
         if model_name in cls._detectors:
             return cls._detectors[model_name]
 
-        if model_name == 'cellpose':
+        if model_name == 'kinet':
+            from .kinet_detector import KiNetDetector
+            detector = KiNetDetector()
+        elif model_name == 'cellpose':
             from .cellpose_detector import CellPoseDetector
             detector = CellPoseDetector()
         elif model_name == 'stardist':

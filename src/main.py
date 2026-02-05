@@ -18,6 +18,7 @@ from detection import (
     is_detection_available,
     is_cellpose_available,
     is_stardist_available,
+    is_kinet_available,
     get_available_models
 )
 
@@ -684,6 +685,7 @@ def get_detection_availability():
     """
     return {
         'available': is_detection_available(),
+        'kinet': is_kinet_available(),
         'cellpose': is_cellpose_available(),
         'stardist': is_stardist_available(),
         'models': get_available_models()
@@ -696,9 +698,10 @@ def detect_nuclei(model_name, classify_mode='auto', dab_threshold=0.3, settings=
     Run nucleus detection on the current image.
 
     Args:
-        model_name: 'cellpose' or 'stardist'
-        classify_mode: 'auto' (DAB threshold), 'all_positive', or 'all_negative'
-        dab_threshold: 0.0-1.0 threshold for auto classification
+        model_name: 'kinet', 'cellpose', or 'stardist'
+        classify_mode: 'auto' (model-based for KiNet, DAB threshold for others),
+                       'all_positive', or 'all_negative'
+        dab_threshold: 0.0-1.0 threshold for auto classification (non-KiNet)
         settings: dict with algorithm parameters (diameter, thresholds, etc.)
 
     Returns:
@@ -726,22 +729,29 @@ def detect_nuclei(model_name, classify_mode='auto', dab_threshold=0.3, settings=
         # Save current markers to undo history
         _save_to_history()
 
-        progress_callback("Extracting hematoxylin channel...", 0.05)
-
-        # Use hematoxylin channel for detection (better for IHC)
-        from detection.color_deconv import separate_stains
-        hematoxylin, dab_channel = separate_stains(image_array)
-
-        # Convert hematoxylin to uint8 image for detection
-        # Normalize and invert (nuclei should be bright)
-        h_max = np.max(hematoxylin)
-        if h_max > 0:
-            h_normalized = (hematoxylin / h_max * 255).astype(np.uint8)
+        # KiNet uses original RGB and provides built-in classification
+        # CellPose/StarDist use hematoxylin channel for better IHC detection
+        if model_name == 'kinet':
+            # KiNet uses original RGB image
+            detection_image = image_array
+            dab_channel = None
         else:
-            h_normalized = np.zeros_like(hematoxylin, dtype=np.uint8)
+            progress_callback("Extracting hematoxylin channel...", 0.05)
 
-        # Create grayscale image for detector (H, W, 3) format
-        detection_image = np.stack([h_normalized, h_normalized, h_normalized], axis=-1)
+            # Use hematoxylin channel for detection (better for IHC)
+            from detection.color_deconv import separate_stains
+            hematoxylin, dab_channel = separate_stains(image_array)
+
+            # Convert hematoxylin to uint8 image for detection
+            # Normalize (nuclei should be bright)
+            h_max = np.max(hematoxylin)
+            if h_max > 0:
+                h_normalized = (hematoxylin / h_max * 255).astype(np.uint8)
+            else:
+                h_normalized = np.zeros_like(hematoxylin, dtype=np.uint8)
+
+            # Create grayscale image for detector (H, W, 3) format
+            detection_image = np.stack([h_normalized, h_normalized, h_normalized], axis=-1)
 
         progress_callback("Initializing detector...", 0.1)
 
@@ -764,32 +774,58 @@ def detect_nuclei(model_name, classify_mode='auto', dab_threshold=0.3, settings=
 
         progress_callback("Classifying markers...", 0.9)
 
-        # Classify nuclei
-        if classify_mode == 'auto':
-            from detection.color_deconv import classify_by_dab_intensity
-
-            # Use the dab_channel we already computed
-            centroids = [(n.x, n.y) for n in nuclei]
-            classifications = classify_by_dab_intensity(
-                dab_channel, centroids, threshold=dab_threshold
-            )
-        elif classify_mode == 'all_positive':
-            classifications = [True] * len(nuclei)
-        else:  # all_negative
-            classifications = [False] * len(nuclei)
-
         # Clear existing markers and create new ones
         field.markers.clear()
 
-        for nucleus, is_positive in zip(nuclei, classifications):
-            marker_class = MarkerClass.POSITIVE if is_positive else MarkerClass.NEGATIVE
-            marker = Marker(
-                marker_class=marker_class,
-                x=nucleus.x,
-                y=nucleus.y,
-                selected=False
-            )
-            field.markers.append(marker)
+        # Classify nuclei based on mode
+        if classify_mode == 'all_positive':
+            for nucleus in nuclei:
+                field.markers.append(Marker(
+                    marker_class=MarkerClass.POSITIVE,
+                    x=nucleus.x,
+                    y=nucleus.y,
+                    selected=False
+                ))
+        elif classify_mode == 'all_negative':
+            for nucleus in nuclei:
+                field.markers.append(Marker(
+                    marker_class=MarkerClass.NEGATIVE,
+                    x=nucleus.x,
+                    y=nucleus.y,
+                    selected=False
+                ))
+        elif classify_mode == 'auto':
+            # KiNet provides built-in classification
+            if model_name == 'kinet':
+                for nucleus in nuclei:
+                    # KiNet sets marker_class: 0=positive, 1=negative
+                    if nucleus.marker_class is not None:
+                        mc = MarkerClass.POSITIVE if nucleus.marker_class == 0 else MarkerClass.NEGATIVE
+                    else:
+                        mc = MarkerClass.NEGATIVE  # Default to negative if unclassified
+                    field.markers.append(Marker(
+                        marker_class=mc,
+                        x=nucleus.x,
+                        y=nucleus.y,
+                        selected=False
+                    ))
+            else:
+                # CellPose/StarDist: use DAB threshold
+                from detection.color_deconv import classify_by_dab_intensity
+
+                centroids = [(n.x, n.y) for n in nuclei]
+                classifications = classify_by_dab_intensity(
+                    dab_channel, centroids, threshold=dab_threshold
+                )
+
+                for nucleus, is_positive in zip(nuclei, classifications):
+                    mc = MarkerClass.POSITIVE if is_positive else MarkerClass.NEGATIVE
+                    field.markers.append(Marker(
+                        marker_class=mc,
+                        x=nucleus.x,
+                        y=nucleus.y,
+                        selected=False
+                    ))
 
         progress_callback(f"Detected {len(nuclei)} nuclei", 1.0)
 

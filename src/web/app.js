@@ -148,6 +148,10 @@ function init() {
         settingNmsValue: document.getElementById('setting-nms-value'),
         cellposeSettings: document.getElementById('cellpose-settings'),
         stardistSettings: document.getElementById('stardist-settings'),
+        kinetSettings: document.getElementById('kinet-settings'),
+        settingKinetThreshold: document.getElementById('setting-kinet-threshold'),
+        settingKinetThresholdValue: document.getElementById('setting-kinet-threshold-value'),
+        settingKinetDistance: document.getElementById('setting-kinet-distance'),
         settingsReset: document.getElementById('settings-reset'),
         settingsClose: document.getElementById('settings-close')
     };
@@ -291,6 +295,9 @@ function bindEvents() {
     });
     elements.settingNms.addEventListener('input', () => {
         elements.settingNmsValue.textContent = parseFloat(elements.settingNms.value).toFixed(2);
+    });
+    elements.settingKinetThreshold.addEventListener('input', () => {
+        elements.settingKinetThresholdValue.textContent = parseFloat(elements.settingKinetThreshold.value).toFixed(2);
     });
 }
 
@@ -1640,13 +1647,12 @@ function updateSettingsVisibility() {
     const model = elements.detectModel.value;
     elements.cellposeSettings.style.display = (model === 'cellpose') ? 'block' : 'none';
     elements.stardistSettings.style.display = (model === 'stardist') ? 'block' : 'none';
+    elements.kinetSettings.style.display = (model === 'kinet') ? 'block' : 'none';
 }
 
 function resetDetectionSettings() {
-    // General
-    elements.settingDiameter.value = 0;
-
     // CellPose
+    elements.settingDiameter.value = 0;
     elements.settingCellprob.value = 0;
     elements.settingCellprobValue.textContent = '0.0';
     elements.settingFlow.value = 0.4;
@@ -1657,15 +1663,25 @@ function resetDetectionSettings() {
     elements.settingProbValue.textContent = '0.50';
     elements.settingNms.value = 0.3;
     elements.settingNmsValue.textContent = '0.30';
+
+    // KiNet
+    elements.settingKinetThreshold.value = 0.3;
+    elements.settingKinetThresholdValue.textContent = '0.30';
+    elements.settingKinetDistance.value = 5;
 }
 
 function getDetectionSettings() {
     return {
+        // CellPose
         diameter: parseInt(elements.settingDiameter.value) || 0,
         cellprob_threshold: parseFloat(elements.settingCellprob.value),
         flow_threshold: parseFloat(elements.settingFlow.value),
+        // StarDist
         prob_thresh: parseFloat(elements.settingProb.value),
-        nms_thresh: parseFloat(elements.settingNms.value)
+        nms_thresh: parseFloat(elements.settingNms.value),
+        // KiNet
+        threshold: parseFloat(elements.settingKinetThreshold.value),
+        min_distance: parseInt(elements.settingKinetDistance.value) || 5
     };
 }
 
