@@ -92,6 +92,30 @@ KiNet weights (~45MB) are currently hosted on Dropbox (from original repo).
 2. Upload `ki67net-best.pth` as release asset
 3. Update `MODEL_URL` in `src/detection/kinet_detector.py`
 
+### Retraining KiNet
+To improve the model with additional training data:
+
+**Training data format:**
+- RGB images in `images/train/` and `images/val/`
+- Three label images per training image (proximity maps = Gaussian blobs at each nucleus):
+  - `labels_postm/` - Positive tumor nuclei
+  - `labels_negtm/` - Negative tumor nuclei
+  - `labels_other/` - Non-tumor nuclei
+
+**Proximity map generation:** `Label(x,y) = exp(-d²/2σ²) × 255` where d = distance from nucleus centroid
+
+**Requirements:**
+- CUDA GPU for training (~hours for 100k iterations)
+- PyTorch 0.4.1+ (original) or modern PyTorch with minor adjustments
+- Training script: `train.py` in original KiNet repo
+
+**Potential workflow:**
+1. Use kiQuant to manually annotate images (creates point annotations)
+2. Export annotations to KiNet label format (would need export function)
+3. Fine-tune from existing weights using `--weights` flag
+
+See: https://github.com/exhh/KiNet for original training code.
+
 ### Dependencies
 AI detection requires additional packages not in base requirements:
 - KiNet: `torch`, `scikit-image`
