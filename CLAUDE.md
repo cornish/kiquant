@@ -75,6 +75,31 @@ scripts\build.bat
 - ERASER (3): Click to delete markers
 - PAN (4): Drag to pan image
 
+## AI Detection (experimental)
+
+The `src/detection/` module provides optional AI-powered nucleus detection:
+
+### Available Models
+- **KiNet**: Purpose-built for Ki-67 IHC images. Provides joint detection AND classification (positive/negative) in a single pass. Based on Xing et al. "Pixel-to-pixel Learning with Weak Supervision for Single-stage Nucleus Recognition in Ki67 Images" (IEEE TBME, 2019). Original code: https://github.com/exhh/KiNet
+- **CellPose**: General nucleus segmentation (requires hematoxylin extraction for IHC)
+- **StarDist**: General nucleus detection (requires hematoxylin extraction for IHC)
+
+### Model Weights
+KiNet weights (~45MB) are currently hosted on Dropbox (from original repo).
+
+**TODO for release**: Move weights to GitHub Releases for long-term reliability:
+1. Create release (e.g., `v0.2.0` or `kinet-weights`)
+2. Upload `ki67net-best.pth` as release asset
+3. Update `MODEL_URL` in `src/detection/kinet_detector.py`
+
+### Dependencies
+AI detection requires additional packages not in base requirements:
+- KiNet: `torch`, `scikit-image`
+- CellPose: `cellpose>=3.0,<4.0`
+- StarDist: `stardist`, `tensorflow>=2.10`
+
+Install via `scripts/install-ai.bat` (CPU) or `scripts/install-ai-gpu.bat` (GPU).
+
 ## Testing
 
 No automated tests. Manual testing required:

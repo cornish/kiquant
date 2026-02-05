@@ -12,8 +12,10 @@ import numpy as np
 from .detector import BaseDetector, DetectedNucleus
 
 
-# Pretrained model URL (hosted on GitHub Releases)
-MODEL_URL = "https://github.com/cornish/kiquant/releases/download/v0.2.0/ki67net-best.pth"
+# Pretrained model URL
+# TODO: Move to GitHub Releases when ready for release
+# Future URL: https://github.com/cornish/kiquant/releases/download/vX.X.X/ki67net-best.pth
+MODEL_URL = "https://www.dropbox.com/s/sl2l5z3d65l983t/ki67net-best.pth?dl=1"
 MODEL_FILENAME = "ki67net-best.pth"
 
 
