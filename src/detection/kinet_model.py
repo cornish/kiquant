@@ -5,59 +5,177 @@ Based on: Xing et al. "Pixel-to-pixel Learning with Weak Supervision for
 Single-stage Nucleus Recognition in Ki67 Images" IEEE TBME, 2019.
 
 Original code: https://github.com/exhh/KiNet
+This file contains the exact architecture to ensure weight compatibility.
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 
-class ConvBNReLU(nn.Module):
-    """Convolution + BatchNorm + ReLU block."""
+def passthrough(x, **kwargs):
+    return x
 
-    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1):
-        super().__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, padding=padding)
-        self.bn = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
+
+def convAct(nchan):
+    return nn.ELU(inplace=True)
+
+
+class ContBatchNorm2d(nn.modules.batchnorm._BatchNorm):
+    """Continuous Batch Normalization - always uses batch statistics."""
+    def forward(self, input):
+        return F.batch_norm(
+            input, self.running_mean, self.running_var, self.weight, self.bias,
+            True, self.momentum, self.eps)
+
+
+class ConvBN(nn.Module):
+    def __init__(self, nchan, inChans=None):
+        super(ConvBN, self).__init__()
+        if inChans is None:
+            inChans = nchan
+        self.act = convAct(nchan)
+        self.conv = nn.Conv2d(inChans, nchan, kernel_size=3, padding=1)
+        self.bn = ContBatchNorm2d(nchan)
 
     def forward(self, x):
-        return self.relu(self.bn(self.conv(x)))
+        out = self.act(self.bn(self.conv(x)))
+        return out
 
 
-class DownBlock(nn.Module):
-    """Downsampling block with two convolutions and max pooling."""
+def _make_nConv(nchan, depth):
+    layers = []
+    if depth >= 0:
+        for _ in range(depth):
+            layers.append(ConvBN(nchan))
+        return nn.Sequential(*layers)
+    else:
+        return passthrough
 
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        self.conv1 = ConvBNReLU(in_channels, out_channels)
-        self.conv2 = ConvBNReLU(out_channels, out_channels)
-        self.pool = nn.MaxPool2d(2, 2)
+
+class InputTransition(nn.Module):
+    def __init__(self, inputChans, outChans):
+        self.outChans = outChans
+        self.inputChans = inputChans
+        super(InputTransition, self).__init__()
+        self.conv = nn.Conv2d(inputChans, outChans, kernel_size=3, padding=1)
+        self.bn = ContBatchNorm2d(outChans)
+        self.relu = convAct(outChans)
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = self.conv2(x)
-        return self.pool(x), x  # Return pooled and skip connection
+        out = self.bn(self.conv(x))
+        if self.inputChans == 1:
+            x_aug = torch.cat([x] * self.outChans, 0)
+            out = self.relu(torch.add(out, x_aug))
+        else:
+            out = self.relu(out)
+        return out
 
 
-class UpBlock(nn.Module):
-    """Upsampling block with skip connection."""
+class DownTransition(nn.Module):
+    def __init__(self, inChans, outChans, nConvs, dropout=False):
+        super(DownTransition, self).__init__()
+        self.down_conv = nn.Conv2d(inChans, outChans, kernel_size=3, padding=1, stride=2)
+        self.bn1 = ContBatchNorm2d(outChans)
+        self.do1 = passthrough
+        self.relu1 = convAct(outChans)
+        self.relu2 = convAct(outChans)
+        if dropout:
+            self.do1 = nn.Dropout2d()
+        self.ops = _make_nConv(outChans, nConvs)
 
-    def __init__(self, in_channels, skip_channels, out_channels):
-        super().__init__()
-        self.up = nn.ConvTranspose2d(in_channels, in_channels, kernel_size=2, stride=2)
-        self.conv1 = ConvBNReLU(in_channels + skip_channels, out_channels)
-        self.conv2 = ConvBNReLU(out_channels, out_channels)
+    def forward(self, x):
+        down = self.relu1(self.bn1(self.down_conv(x)))
+        out = self.do1(down)
+        out = self.ops(out)
+        out = self.relu2(out + down)
+        return out
 
-    def forward(self, x, skip):
-        x = self.up(x)
-        # Handle size mismatch
-        if x.size() != skip.size():
-            x = F.interpolate(x, size=skip.shape[2:], mode='bilinear', align_corners=True)
-        x = torch.cat([x, skip], dim=1)
-        x = self.conv1(x)
-        x = self.conv2(x)
-        return x
+
+def match_tensor(out, refer_shape):
+    skiprow, skipcol = refer_shape
+    row, col = out.size()[2], out.size()[3]
+    if skipcol >= col:
+        pad_col = skipcol - col
+        left_pad_col = pad_col // 2
+        right_pad_col = pad_col - left_pad_col
+        out = F.pad(out, (left_pad_col, right_pad_col, 0, 0))
+    else:
+        crop_col = col - skipcol
+        left_crop_col = crop_col // 2
+        right_col = left_crop_col + skipcol
+        out = out[:, :, :, left_crop_col:right_col]
+
+    if skiprow >= row:
+        pad_row = skiprow - row
+        left_pad_row = pad_row // 2
+        right_pad_row = pad_row - left_pad_row
+        out = F.pad(out, (0, 0, left_pad_row, right_pad_row))
+    else:
+        crop_row = row - skiprow
+        left_crop_row = crop_row // 2
+        right_row = left_crop_row + skiprow
+        out = out[:, :, left_crop_row:right_row, :]
+
+    return out
+
+
+class UpConcat(nn.Module):
+    def __init__(self, inChans, hidChans, outChans, nConvs, dropout=False, stride=2):
+        super(UpConcat, self).__init__()
+        self.up_conv = nn.ConvTranspose2d(inChans, hidChans, kernel_size=3,
+                                          padding=1, stride=stride, output_padding=1)
+        self.bn1 = ContBatchNorm2d(hidChans)
+        self.do1 = passthrough
+        self.do2 = nn.Dropout2d()
+        self.relu1 = convAct(hidChans)
+        self.relu2 = convAct(outChans)
+        if dropout:
+            self.do1 = nn.Dropout2d()
+        self.ops = _make_nConv(outChans, nConvs)
+
+    def forward(self, x, skipx):
+        out = self.do1(x)
+        skipxdo = self.do2(skipx)
+        out = self.relu1(self.bn1(self.up_conv(out)))
+        out = match_tensor(out, skipxdo.size()[2:])
+        xcat = torch.cat([out, skipxdo], 1)
+        out = self.ops(xcat)
+        out = self.relu2(out + xcat)
+        return out
+
+
+class UpConv(nn.Module):
+    def __init__(self, inChans, outChans, nConvs, dropout=False, stride=2):
+        super(UpConv, self).__init__()
+        self.up_conv = nn.ConvTranspose2d(inChans, outChans, kernel_size=3,
+                                          padding=1, stride=stride, output_padding=1)
+        self.bn1 = ContBatchNorm2d(outChans)
+        self.do1 = passthrough
+        self.relu1 = convAct(outChans)
+        if dropout:
+            self.do1 = nn.Dropout2d()
+
+    def forward(self, x, dest_size):
+        out = self.do1(x)
+        out = self.relu1(self.bn1(self.up_conv(out)))
+        out = match_tensor(out, dest_size)
+        return out
+
+
+class OutputTransition(nn.Module):
+    def __init__(self, inChans, outChans=1, hidChans=2):
+        super(OutputTransition, self).__init__()
+        self.conv1 = nn.Conv2d(inChans, hidChans, kernel_size=5, padding=2)
+        self.bn1 = ContBatchNorm2d(hidChans)
+        self.relu1 = convAct(hidChans)
+        self.conv2 = nn.Conv2d(hidChans, outChans, kernel_size=1)
+
+    def forward(self, x):
+        out = self.relu1(self.bn1(self.conv1(x)))
+        out = self.conv2(out)
+        return out
 
 
 class Ki67Net(nn.Module):
@@ -71,73 +189,68 @@ class Ki67Net(nn.Module):
         - Channel 2: Non-tumor nuclei
     """
 
-    def __init__(self, num_cls=3):
-        super().__init__()
-
-        # Input transition
-        self.input_conv = ConvBNReLU(3, 32)
-
-        # Encoder (downsampling path)
-        self.down1 = DownBlock(32, 64)
-        self.down2 = DownBlock(64, 128)
-        self.down3 = DownBlock(128, 256)
-        self.down4 = DownBlock(256, 256)
-
-        # Bottleneck
-        self.bottleneck = nn.Sequential(
-            ConvBNReLU(256, 256),
-            ConvBNReLU(256, 256)
-        )
-
-        # Decoder (upsampling path)
-        self.up4 = UpBlock(256, 256, 256)
-        self.up3 = UpBlock(256, 256, 128)
-        self.up2 = UpBlock(128, 128, 64)
-        self.up1 = UpBlock(64, 64, 32)
-
-        # Output transition
-        self.output_conv = nn.Conv2d(32, num_cls, kernel_size=1)
-
-        # Initialize weights
-        self._init_weights()
-
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-
-    def forward(self, x):
-        # Input
-        x = self.input_conv(x)
+    def __init__(self, nll=False):
+        super(Ki67Net, self).__init__()
+        self.register_buffer('device_id', torch.zeros(1))
 
         # Encoder
-        x, skip1 = self.down1(x)
-        x, skip2 = self.down2(x)
-        x, skip3 = self.down3(x)
-        x, skip4 = self.down4(x)
+        self.in_tr_100 = InputTransition(3, 32)
+        self.down_tr32_50 = DownTransition(32, 64, 1)
+        self.down_tr64_25 = DownTransition(64, 128, 2)
+        self.down_tr128_12 = DownTransition(128, 256, 2, dropout=True)
+        self.down_tr256_6 = DownTransition(256, 256, 2, dropout=True)
 
-        # Bottleneck
-        x = self.bottleneck(x)
+        # Decoder with skip connections
+        self.up_tr256_12 = UpConcat(256, 256, 512, 2, dropout=True)
+        self.up_tr128_25 = UpConcat(512, 128, 256, 2, dropout=True)
+        self.up_tr64_50 = UpConcat(256, 64, 128, 1)
+        self.up_tr32_100 = UpConcat(128, 32, 64, 1)
 
-        # Decoder
-        x = self.up4(x, skip4)
-        x = self.up3(x, skip3)
-        x = self.up2(x, skip2)
-        x = self.up1(x, skip1)
+        # Direct upsampling paths
+        self.up_12_100 = UpConv(512, 64, 2, stride=8)
+        self.up_25_100 = UpConv(256, 64, 2, stride=4)
 
         # Output
-        x = self.output_conv(x)
+        self.out_tr = OutputTransition(64 * 3, 3, 32)
 
-        return x
+    def forward(self, x):
+        # Move to same device as model
+        if self.device_id.is_cuda:
+            x = x.cuda(self.device_id.get_device())
 
-    def predict(self, x):
+        # Encoder
+        out16 = self.in_tr_100(x)
+        out32 = self.down_tr32_50(out16)
+        out64 = self.down_tr64_25(out32)
+        out128 = self.down_tr128_12(out64)
+        out256 = self.down_tr256_6(out128)
+
+        # Decoder with skip connections
+        out_up_12 = self.up_tr256_12(out256, out128)
+        out_up_25 = self.up_tr128_25(out_up_12, out64)
+        out_up_50 = self.up_tr64_50(out_up_25, out32)
+        out_up_50_100 = self.up_tr32_100(out_up_50, out16)
+
+        # Direct upsampling from intermediate levels
+        out_up_12_100 = self.up_12_100(out_up_12, x.size()[2:])
+        out_up_25_100 = self.up_25_100(out_up_25, x.size()[2:])
+
+        # Concatenate multi-scale features
+        out_cat = torch.cat([out_up_50_100, out_up_12_100, out_up_25_100], 1)
+
+        # Output
+        out = self.out_tr(out_cat)
+        return out
+
+    def predict(self, batch_data, batch_size=None):
         """Run inference and return numpy array."""
         self.eval()
         with torch.no_grad():
-            output = self.forward(x)
-            return output.cpu().numpy()
+            if isinstance(batch_data, np.ndarray):
+                batch_data = torch.from_numpy(batch_data.astype(np.float32))
+
+            if self.device_id.is_cuda:
+                batch_data = batch_data.cuda(self.device_id.get_device())
+
+            det = self.forward(batch_data)
+            return det.cpu().data.numpy()

@@ -36,6 +36,32 @@ class KiNetDetector(BaseDetector):
         os.makedirs(model_dir, exist_ok=True)
         return os.path.join(model_dir, MODEL_FILENAME)
 
+    def _safe_load_state_dict(self, net, state_dict, progress_callback=None):
+        """
+        Load state dict, skipping any keys that don't match.
+        Based on original KiNet's safe_load_state_dict.
+        """
+        own_state = net.state_dict()
+        skipped = []
+        loaded = []
+
+        for name, param in state_dict.items():
+            if name not in own_state:
+                skipped.append(name)
+                continue
+            if hasattr(param, 'data'):
+                param = param.data
+            if own_state[name].size() != param.size():
+                skipped.append(f"{name} (size mismatch)")
+                continue
+            own_state[name].copy_(param)
+            loaded.append(name)
+
+        if skipped and progress_callback:
+            progress_callback(f"Loaded {len(loaded)} params, skipped {len(skipped)}", 0.8)
+        elif progress_callback:
+            progress_callback(f"Loaded {len(loaded)} parameters", 0.8)
+
     def _download_model(self, progress_callback: Optional[Callable] = None) -> str:
         """Download pretrained model weights."""
         import urllib.request
@@ -88,17 +114,10 @@ class KiNetDetector(BaseDetector):
         if progress_callback:
             progress_callback("Loading weights...", 0.7)
 
-        state_dict = torch.load(model_path, map_location=self._device)
+        state_dict = torch.load(model_path, map_location=self._device, weights_only=False)
 
-        # Handle potential key mismatches from original model
-        # The original model may have different key names
-        try:
-            self._model.load_state_dict(state_dict, strict=False)
-        except Exception:
-            # If loading fails, we'll use the model with random weights
-            # User should retrain or provide compatible weights
-            if progress_callback:
-                progress_callback("Warning: Using untrained model", 0.8)
+        # Use safe loading that skips mismatched keys
+        self._safe_load_state_dict(self._model, state_dict, progress_callback)
 
         self._model = self._model.to(self._device)
         self._model.eval()
