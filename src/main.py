@@ -13,7 +13,7 @@ from tkinter import Tk, filedialog, messagebox
 from PIL import Image
 import numpy as np
 
-from marker_state import State, Field, Marker, MarkerClass, Mode
+from marker_state import State, Field, Marker, MarkerClass, Mode, ROI
 from detection import (
     is_detection_available,
     is_cellpose_available,
@@ -297,7 +297,8 @@ def get_image_data(index=None):
             'height': img.height,
             'markers': [m.to_dict() for m in field.markers],
             'positive_count': field.get_positive_count(),
-            'negative_count': field.get_negative_count()
+            'negative_count': field.get_negative_count(),
+            'roi': field.roi.to_dict() if field.roi else None
         }
     except Exception as e:
         return {'error': str(e)}
@@ -603,6 +604,112 @@ def convert_selected_markers(new_class):
         'negative_count': field.get_negative_count(),
         'can_undo': len(_get_field_history(state.current_index)['undo']) > 0,
         'can_redo': len(_get_field_history(state.current_index)['redo']) > 0
+    }
+
+
+# ============== ROI (Region of Interest) ==============
+
+@eel.expose
+def set_roi(x, y, width, height):
+    """Set the ROI for the current field."""
+    field = state.get_current_field()
+    if not field:
+        return None
+
+    field.roi = ROI(x=int(x), y=int(y), width=int(width), height=int(height))
+
+    return {
+        'roi': field.roi.to_dict(),
+        'positive_count': field.get_positive_count(),
+        'negative_count': field.get_negative_count(),
+        'total_count': field.get_total_count()
+    }
+
+
+@eel.expose
+def clear_roi():
+    """Clear the ROI for the current field."""
+    field = state.get_current_field()
+    if not field:
+        return None
+
+    field.roi = None
+
+    return {
+        'roi': None,
+        'positive_count': field.get_positive_count(),
+        'negative_count': field.get_negative_count(),
+        'total_count': field.get_total_count()
+    }
+
+
+@eel.expose
+def get_roi():
+    """Get the current ROI."""
+    field = state.get_current_field()
+    if not field or not field.roi:
+        return None
+    return field.roi.to_dict()
+
+
+@eel.expose
+def find_hotspot(target_count=500):
+    """
+    Find the hotspot region with highest positive ratio.
+
+    Args:
+        target_count: Target number of nuclei in the ROI (default 500)
+
+    Returns:
+        Dict with ROI and updated counts, or None if failed
+    """
+    field = state.get_current_field()
+    if not field:
+        return {'success': False, 'message': 'No image loaded'}
+
+    if len(field.markers) == 0:
+        return {'success': False, 'message': 'No markers to analyze'}
+
+    # Get image dimensions
+    try:
+        img = Image.open(field.filepath)
+        image_width, image_height = img.width, img.height
+    except Exception:
+        image_width, image_height = None, None
+
+    roi = field.find_hotspot(
+        target_count=target_count,
+        image_width=image_width,
+        image_height=image_height
+    )
+
+    if roi is None:
+        return {'success': False, 'message': 'Could not find suitable hotspot'}
+
+    field.roi = roi
+
+    return {
+        'success': True,
+        'roi': roi.to_dict(),
+        'positive_count': field.get_positive_count(),
+        'negative_count': field.get_negative_count(),
+        'total_count': field.get_total_count()
+    }
+
+
+@eel.expose
+def get_roi_counts():
+    """Get counts within current ROI (or all markers if no ROI)."""
+    field = state.get_current_field()
+    if not field:
+        return None
+
+    return {
+        'positive_count': field.get_positive_count(),
+        'negative_count': field.get_negative_count(),
+        'total_count': field.get_total_count(),
+        'has_roi': field.roi is not None,
+        'roi': field.roi.to_dict() if field.roi else None
     }
 
 

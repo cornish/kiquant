@@ -371,6 +371,11 @@ body {
     cursor: grabbing;
 }
 
+/* ROI mode cursor */
+#canvas.mode-roi {
+    cursor: crosshair;
+}
+
 /* Welcome Message */
 #welcome-message {
     text-align: center;

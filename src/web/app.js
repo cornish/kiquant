@@ -8,7 +8,8 @@ const Mode = {
     NEGATIVE: 1,
     SELECT: 2,
     ERASER: 3,
-    PAN: 4
+    PAN: 4,
+    ROI: 5
 };
 
 const MarkerClass = {
@@ -62,6 +63,11 @@ let lassoPoints = []; // For lasso selection
 
 // Track unsaved changes
 let hasUnsavedChanges = false;
+
+// ROI state
+let currentROI = null; // {x, y, width, height} or null
+let isDrawingROI = false;
+let roiStart = { x: 0, y: 0 };
 
 // Canvas and context
 let canvas, ctx;
@@ -153,7 +159,11 @@ function init() {
         settingKinetThresholdValue: document.getElementById('setting-kinet-threshold-value'),
         settingKinetDistance: document.getElementById('setting-kinet-distance'),
         settingsReset: document.getElementById('settings-reset'),
-        settingsClose: document.getElementById('settings-close')
+        settingsClose: document.getElementById('settings-close'),
+        // ROI elements
+        btnRoi: document.getElementById('btn-roi'),
+        btnHotspot: document.getElementById('btn-hotspot'),
+        btnClearRoi: document.getElementById('btn-clear-roi')
     };
 
     canvas = elements.canvas;
@@ -299,6 +309,11 @@ function bindEvents() {
     elements.settingKinetThreshold.addEventListener('input', () => {
         elements.settingKinetThresholdValue.textContent = parseFloat(elements.settingKinetThreshold.value).toFixed(2);
     });
+
+    // ROI controls
+    elements.btnRoi.addEventListener('click', () => setMode(Mode.ROI));
+    elements.btnHotspot.addEventListener('click', handleFindHotspot);
+    elements.btnClearRoi.addEventListener('click', handleClearROI);
 }
 
 async function showAboutModal() {
@@ -543,6 +558,7 @@ async function loadCurrentImage() {
 
         // Store markers
         markers = data.markers;
+        currentROI = data.roi || null;
 
         // Fit to window on first load, preserve viewport on navigation
         if (isFirstLoad) {
@@ -591,6 +607,7 @@ async function loadImageData(data) {
         canvas.width = data.width;
         canvas.height = data.height;
         markers = data.markers;
+        currentROI = data.roi || null;
 
         // Constrain pan to new image bounds, preserve zoom level
         constrainPan();
@@ -885,7 +902,7 @@ function updateModeUI() {
     });
 
     // Update canvas cursor class (preserve other classes)
-    canvas.classList.remove('mode-positive', 'mode-negative', 'mode-select', 'mode-eraser', 'mode-pan');
+    canvas.classList.remove('mode-positive', 'mode-negative', 'mode-select', 'mode-eraser', 'mode-pan', 'mode-roi');
     switch (currentMode) {
         case Mode.POSITIVE:
             canvas.classList.add('mode-positive');
@@ -906,6 +923,10 @@ function updateModeUI() {
         case Mode.PAN:
             canvas.classList.add('mode-pan');
             elements.statusMode.textContent = 'Mode: Pan';
+            break;
+        case Mode.ROI:
+            canvas.classList.add('mode-roi');
+            elements.statusMode.textContent = 'Mode: ROI';
             break;
     }
 }
@@ -1104,6 +1125,12 @@ async function handleCanvasMouseDown(e) {
                 renderOverview();
             }
         }
+    } else if (currentMode === Mode.ROI) {
+        if (isLeftClick) {
+            isDrawingROI = true;
+            roiStart = coords;
+            dragEnd = coords;
+        }
     }
 }
 
@@ -1116,6 +1143,15 @@ function handleCanvasMouseMove(e) {
         constrainPan();
         render();
         updateOverviewViewport();
+        return;
+    }
+
+    // Handle ROI drawing
+    if (isDrawingROI) {
+        const coords = getImageCoords(e);
+        dragEnd = coords;
+        render();
+        drawROIPreviewOnOverlay(coords);
         return;
     }
 
@@ -1140,6 +1176,38 @@ function handleCanvasMouseMove(e) {
     if (currentMode === Mode.SELECT) {
         drawSelectionOnOverlay(coords);
     }
+}
+
+function drawROIPreviewOnOverlay(currentCoords) {
+    if (!currentImage) return;
+
+    const vp = elements.canvasViewport;
+    const viewWidth = vp.clientWidth || elements.canvasContainer.clientWidth;
+    const viewHeight = vp.clientHeight || elements.canvasContainer.clientHeight;
+    const imgWidth = currentImage.width * zoom;
+    const imgHeight = currentImage.height * zoom;
+    const imgLeft = (viewWidth - imgWidth) / 2 + panX;
+    const imgTop = (viewHeight - imgHeight) / 2 + panY;
+
+    // Convert to screen coords
+    const x1 = imgLeft + roiStart.x * zoom;
+    const y1 = imgTop + roiStart.y * zoom;
+    const x2 = imgLeft + currentCoords.x * zoom;
+    const y2 = imgTop + currentCoords.y * zoom;
+
+    const x = Math.min(x1, x2);
+    const y = Math.min(y1, y2);
+    const w = Math.abs(x2 - x1);
+    const h = Math.abs(y2 - y1);
+
+    overlayCtx.strokeStyle = '#00bfff';
+    overlayCtx.lineWidth = 2;
+    overlayCtx.setLineDash([5, 5]);
+    overlayCtx.strokeRect(x, y, w, h);
+    overlayCtx.setLineDash([]);
+
+    overlayCtx.fillStyle = 'rgba(0, 191, 255, 0.1)';
+    overlayCtx.fillRect(x, y, w, h);
 }
 
 function drawSelectionOnOverlay(currentCoords) {
@@ -1206,6 +1274,24 @@ async function handleCanvasMouseUp(e) {
     }
 
     if (!isProjectLoaded) return;
+
+    // Handle ROI drawing completion
+    if (currentMode === Mode.ROI && isDrawingROI) {
+        const coords = getImageCoords(e);
+        const x = Math.min(roiStart.x, coords.x);
+        const y = Math.min(roiStart.y, coords.y);
+        const w = Math.abs(coords.x - roiStart.x);
+        const h = Math.abs(coords.y - roiStart.y);
+
+        isDrawingROI = false;
+
+        if (w > 20 && h > 20) {
+            handleSetROI(x, y, w, h);
+        } else {
+            render(); // Clear preview
+        }
+        return;
+    }
 
     if (currentMode === Mode.SELECT && isDragging) {
         const coords = getImageCoords(e);
@@ -1349,6 +1435,9 @@ async function handleKeyDown(e) {
         case 'h':
             setMode(Mode.PAN);
             break;
+        case 'r':
+            setMode(Mode.ROI);
+            break;
         case 'g':
             toggleGuide();
             break;
@@ -1447,6 +1536,9 @@ function renderOverlayMarkers(viewWidth, viewHeight, imgLeft, imgTop) {
     // Clear overlay
     overlayCtx.clearRect(0, 0, viewWidth, viewHeight);
 
+    // Draw ROI if present
+    drawROIOnOverlay(imgLeft, imgTop);
+
     // Draw marker bounding box guide on overlay
     drawGuideOnOverlay(imgLeft, imgTop);
 
@@ -1456,7 +1548,15 @@ function renderOverlayMarkers(viewWidth, viewHeight, imgLeft, imgTop) {
         const screenX = imgLeft + marker.x * zoom;
         const screenY = imgTop + marker.y * zoom;
 
-        drawMarkerOnOverlay(marker, screenX, screenY);
+        // Dim markers outside ROI if ROI is active
+        const inROI = !currentROI || (
+            marker.x >= currentROI.x &&
+            marker.x <= currentROI.x + currentROI.width &&
+            marker.y >= currentROI.y &&
+            marker.y <= currentROI.y + currentROI.height
+        );
+
+        drawMarkerOnOverlay(marker, screenX, screenY, inROI ? 1.0 : 0.3);
     });
 }
 
@@ -1530,9 +1630,11 @@ function drawGuideOnOverlay(imgLeft, imgTop) {
     overlayCtx.stroke();
 }
 
-function drawMarkerOnOverlay(marker, screenX, screenY) {
+function drawMarkerOnOverlay(marker, screenX, screenY, opacity = 1.0) {
     const r = MARKER_RADIUS;
     const t = MARKER_THICKNESS;
+
+    overlayCtx.globalAlpha = opacity;
 
     if (marker.selected) {
         overlayCtx.fillStyle = '#ffd700';
@@ -1541,6 +1643,8 @@ function drawMarkerOnOverlay(marker, screenX, screenY) {
 
     overlayCtx.fillStyle = marker.marker_class === MarkerClass.POSITIVE ? '#4caf50' : '#f44336';
     drawCrossOnOverlay(screenX, screenY, r, t);
+
+    overlayCtx.globalAlpha = 1.0;
 }
 
 function drawCrossOnOverlay(x, y, l, t) {
@@ -1579,6 +1683,96 @@ async function updateSummary() {
     } else {
         elements.statusSummary.textContent = '';
     }
+}
+
+// ============== ROI Functions ==============
+
+async function handleFindHotspot() {
+    if (!isProjectLoaded) return;
+
+    const result = await eel.find_hotspot(500)();
+    if (result.success) {
+        currentROI = result.roi;
+        updateCounts(result.positive_count, result.negative_count);
+        markUnsavedChanges();
+        render();
+        renderOverview();
+    } else {
+        alert(result.message);
+    }
+}
+
+async function handleClearROI() {
+    if (!isProjectLoaded) return;
+
+    const result = await eel.clear_roi()();
+    if (result) {
+        currentROI = null;
+        updateCounts(result.positive_count, result.negative_count);
+        render();
+        renderOverview();
+    }
+}
+
+async function handleSetROI(x, y, width, height) {
+    if (!isProjectLoaded) return;
+
+    // Ensure positive width/height
+    if (width < 0) {
+        x += width;
+        width = -width;
+    }
+    if (height < 0) {
+        y += height;
+        height = -height;
+    }
+
+    // Minimum size
+    if (width < 20 || height < 20) return;
+
+    const result = await eel.set_roi(x, y, width, height)();
+    if (result) {
+        currentROI = result.roi;
+        updateCounts(result.positive_count, result.negative_count);
+        markUnsavedChanges();
+        render();
+        renderOverview();
+    }
+}
+
+function drawROIOnOverlay(imgLeft, imgTop) {
+    if (!currentROI) return;
+
+    // Convert ROI coordinates to screen coordinates
+    const screenX = imgLeft + currentROI.x * zoom;
+    const screenY = imgTop + currentROI.y * zoom;
+    const screenW = currentROI.width * zoom;
+    const screenH = currentROI.height * zoom;
+
+    // Draw ROI rectangle
+    overlayCtx.strokeStyle = '#00bfff';
+    overlayCtx.lineWidth = 2;
+    overlayCtx.setLineDash([]);
+    overlayCtx.strokeRect(screenX, screenY, screenW, screenH);
+
+    // Draw semi-transparent fill
+    overlayCtx.fillStyle = 'rgba(0, 191, 255, 0.1)';
+    overlayCtx.fillRect(screenX, screenY, screenW, screenH);
+
+    // Draw corner handles for resizing
+    const handleSize = 8;
+    overlayCtx.fillStyle = '#00bfff';
+
+    // Corners
+    overlayCtx.fillRect(screenX - handleSize/2, screenY - handleSize/2, handleSize, handleSize);
+    overlayCtx.fillRect(screenX + screenW - handleSize/2, screenY - handleSize/2, handleSize, handleSize);
+    overlayCtx.fillRect(screenX - handleSize/2, screenY + screenH - handleSize/2, handleSize, handleSize);
+    overlayCtx.fillRect(screenX + screenW - handleSize/2, screenY + screenH - handleSize/2, handleSize, handleSize);
+
+    // Label
+    overlayCtx.fillStyle = '#00bfff';
+    overlayCtx.font = '12px sans-serif';
+    overlayCtx.fillText('ROI', screenX + 4, screenY - 4);
 }
 
 // ============== Detection Functions ==============

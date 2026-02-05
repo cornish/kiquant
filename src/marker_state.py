@@ -20,6 +20,8 @@ class Mode(IntEnum):
     NEGATIVE = 1
     SELECT = 2
     ERASER = 3
+    PAN = 4
+    ROI = 5
 
 
 @dataclass
@@ -58,22 +60,51 @@ class Marker:
 
 
 @dataclass
+class ROI:
+    """Region of Interest for quantification."""
+    x: int
+    y: int
+    width: int
+    height: int
+
+    def contains(self, px: int, py: int) -> bool:
+        """Check if point (px, py) is within the ROI."""
+        return (self.x <= px <= self.x + self.width and
+                self.y <= py <= self.y + self.height)
+
+    def to_dict(self) -> dict:
+        return {'x': self.x, 'y': self.y, 'width': self.width, 'height': self.height}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'ROI':
+        return cls(x=data['x'], y=data['y'], width=data['width'], height=data['height'])
+
+
+@dataclass
 class Field:
     """A single image field with its markers."""
     filepath: str
     markers: List[Marker] = field(default_factory=list)
+    roi: Optional[ROI] = None
 
-    def get_count_by_class(self, marker_class: int) -> int:
-        return sum(1 for m in self.markers if m.marker_class == marker_class)
+    def get_markers_in_roi(self) -> List[Marker]:
+        """Get markers within ROI, or all markers if no ROI set."""
+        if self.roi is None:
+            return self.markers
+        return [m for m in self.markers if self.roi.contains(m.x, m.y)]
 
-    def get_positive_count(self) -> int:
-        return self.get_count_by_class(MarkerClass.POSITIVE)
+    def get_count_by_class(self, marker_class: int, use_roi: bool = True) -> int:
+        markers = self.get_markers_in_roi() if use_roi else self.markers
+        return sum(1 for m in markers if m.marker_class == marker_class)
 
-    def get_negative_count(self) -> int:
-        return self.get_count_by_class(MarkerClass.NEGATIVE)
+    def get_positive_count(self, use_roi: bool = True) -> int:
+        return self.get_count_by_class(MarkerClass.POSITIVE, use_roi)
 
-    def get_total_count(self) -> int:
-        return len(self.markers)
+    def get_negative_count(self, use_roi: bool = True) -> int:
+        return self.get_count_by_class(MarkerClass.NEGATIVE, use_roi)
+
+    def get_total_count(self, use_roi: bool = True) -> int:
+        return len(self.get_markers_in_roi() if use_roi else self.markers)
 
     def add_marker(self, marker: Marker) -> None:
         self.markers.append(marker)
@@ -112,17 +143,117 @@ class Field:
                 count += 1
         return count
 
+    def find_hotspot(self, target_count: int = 500, image_width: int = None,
+                     image_height: int = None) -> Optional[ROI]:
+        """
+        Find square ROI with ~target_count nuclei having highest positive ratio.
+
+        Uses a sliding window approach to find the region with the most
+        positive nuclei while containing approximately target_count total nuclei.
+
+        Args:
+            target_count: Target number of nuclei in the ROI (default 500)
+            image_width: Image width to constrain ROI bounds
+            image_height: Image height to constrain ROI bounds
+
+        Returns:
+            ROI with best hotspot, or None if not enough markers
+        """
+        if len(self.markers) < target_count // 2:
+            return None
+
+        # Estimate square size based on marker density
+        if len(self.markers) == 0:
+            return None
+
+        xs = [m.x for m in self.markers]
+        ys = [m.y for m in self.markers]
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+
+        # Calculate density and estimate square size for target count
+        area = max((max_x - min_x) * (max_y - min_y), 1)
+        density = len(self.markers) / area
+        target_area = target_count / density if density > 0 else area
+        square_size = int(target_area ** 0.5)
+
+        # Ensure minimum size
+        square_size = max(square_size, 50)
+
+        # Constrain to image bounds if provided
+        if image_width:
+            square_size = min(square_size, image_width)
+        if image_height:
+            square_size = min(square_size, image_height)
+
+        # Sliding window search with step size
+        step = max(square_size // 10, 20)
+        best_roi = None
+        best_score = -1
+
+        # Define search bounds
+        search_min_x = min_x - square_size // 2
+        search_max_x = max_x
+        search_min_y = min_y - square_size // 2
+        search_max_y = max_y
+
+        if image_width:
+            search_min_x = max(0, search_min_x)
+            search_max_x = min(image_width - square_size, search_max_x)
+        if image_height:
+            search_min_y = max(0, search_min_y)
+            search_max_y = min(image_height - square_size, search_max_y)
+
+        for x in range(search_min_x, search_max_x + 1, step):
+            for y in range(search_min_y, search_max_y + 1, step):
+                # Count markers in this window
+                pos_count = 0
+                total_count = 0
+                for m in self.markers:
+                    if x <= m.x <= x + square_size and y <= m.y <= y + square_size:
+                        total_count += 1
+                        if m.marker_class == MarkerClass.POSITIVE:
+                            pos_count += 1
+
+                # Score: prioritize regions with ~target_count and high positive ratio
+                if total_count > 0:
+                    # Penalize being far from target count
+                    count_factor = 1.0 - abs(total_count - target_count) / max(target_count, total_count)
+                    count_factor = max(0, count_factor)
+
+                    # Positive ratio
+                    pos_ratio = pos_count / total_count
+
+                    # Combined score: weight positive ratio more if we have enough cells
+                    score = pos_ratio * (0.5 + 0.5 * count_factor)
+
+                    if total_count >= target_count * 0.5:  # At least half target
+                        score *= 1.5  # Bonus for having enough cells
+
+                    if score > best_score:
+                        best_score = score
+                        best_roi = ROI(x=x, y=y, width=square_size, height=square_size)
+
+        return best_roi
+
     def to_dict(self) -> dict:
-        return {
+        result = {
             'filepath': self.filepath,
             'markers': [m.to_dict() for m in self.markers]
         }
+        if self.roi is not None:
+            result['roi'] = self.roi.to_dict()
+        return result
 
     @classmethod
     def from_dict(cls, data: dict) -> 'Field':
+        roi = None
+        if 'roi' in data and data['roi'] is not None:
+            roi = ROI.from_dict(data['roi'])
         return cls(
             filepath=data['filepath'],
-            markers=[Marker.from_dict(m) for m in data.get('markers', [])]
+            markers=[Marker.from_dict(m) for m in data.get('markers', [])],
+            roi=roi
         )
 
 
