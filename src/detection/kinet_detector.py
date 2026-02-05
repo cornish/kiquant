@@ -107,8 +107,8 @@ class KiNetDetector(BaseDetector):
         if progress_callback:
             progress_callback("Initializing KiNet...", 0.6)
 
-        # Create model
-        self._model = Ki67Net(num_cls=3)
+        # Create model (Ki67Net has fixed 3-class output)
+        self._model = Ki67Net()
 
         # Load weights
         if progress_callback:
