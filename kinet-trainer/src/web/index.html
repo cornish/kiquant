@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KiNet Trainer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Top Toolbar -->
+        <div id="toolbar">
+            <!-- File Menu Dropdown -->
+            <div class="toolbar-group dropdown-group">
+                <button id="btn-file" class="toolbar-btn dropdown-trigger" title="File Menu">File</button>
+                <div id="file-menu" class="dropdown-menu hidden">
+                    <div class="dropdown-item" data-action="new">New Project</div>
+                    <div class="dropdown-item" data-action="load">Load Project</div>
+                    <div class="dropdown-item" data-action="import">Import kiQuant Project</div>
+                    <div class="dropdown-separator"></div>
+                    <div class="dropdown-item" data-action="save">Save Project</div>
+                    <div class="dropdown-separator"></div>
+                    <div class="dropdown-item" data-action="tile">Prepare Images (Tile)</div>
+                    <div class="dropdown-separator"></div>
+                    <div class="dropdown-item" data-action="detect-current">Detect Current Image</div>
+                    <div class="dropdown-item" data-action="detect-all">Detect All Images</div>
+                    <div class="dropdown-separator"></div>
+                    <div class="dropdown-item" data-action="export">Export Training Data</div>
+                    <div class="dropdown-separator"></div>
+                    <div class="dropdown-item" data-action="evaluate">Evaluate Model</div>
+                    <div class="dropdown-item" data-action="model-browser">Model Browser</div>
+                    <div class="dropdown-separator"></div>
+                    <div class="dropdown-item" data-action="about">About KiNet Trainer</div>
+                </div>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
+            <div class="toolbar-group">
+                <button id="btn-undo" class="toolbar-btn" title="Undo (Ctrl+Z)" disabled>Undo</button>
+                <button id="btn-redo" class="toolbar-btn" title="Redo (Ctrl+Y)" disabled>Redo</button>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
+            <div class="toolbar-group mode-buttons">
+                <button id="btn-positive" class="mode-btn active" data-mode="0" title="Positive Tumor (P)">
+                    <span class="marker-icon positive">+</span> Positive
+                </button>
+                <button id="btn-negative" class="mode-btn" data-mode="1" title="Negative Tumor (N)">
+                    <span class="marker-icon negative">-</span> Negative
+                </button>
+                <button id="btn-other" class="mode-btn" data-mode="2" title="Non-tumor / Other (O)">
+                    <span class="marker-icon other">o</span> Other
+                </button>
+                <button id="btn-eraser" class="mode-btn" data-mode="3" title="Eraser Mode (E)">
+                    Eraser
+                </button>
+                <button id="btn-pan" class="mode-btn" data-mode="4" title="Pan Mode (H)">
+                    Pan
+                </button>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
+            <div class="toolbar-group nav-group">
+                <button id="btn-prev" class="nav-btn" title="Previous Image (Left Arrow)">&lt;</button>
+                <span id="progress">0 / 0</span>
+                <button id="btn-next" class="nav-btn" title="Next Image (Right Arrow)">&gt;</button>
+            </div>
+
+            <div class="toolbar-separator"></div>
+
+            <button id="btn-reviewed" class="toolbar-btn review-btn" title="Mark Reviewed & Next (R)">Mark Reviewed</button>
+
+            <div class="toolbar-separator"></div>
+
+            <div class="toolbar-group counts">
+                <span class="count positive-count">Pos: <span id="count-positive">0</span></span>
+                <span class="count negative-count">Neg: <span id="count-negative">0</span></span>
+                <span class="count other-count">Other: <span id="count-other">0</span></span>
+                <span class="count total-count">Total: <span id="count-total">0</span></span>
+            </div>
+        </div>
+
+        <!-- Main Layout: Sidebar + Canvas -->
+        <div id="main-container">
+            <!-- Sidebar: Image list -->
+            <div id="sidebar">
+                <div id="sidebar-header">
+                    <span>Images</span>
+                    <span id="sidebar-stats"></span>
+                </div>
+                <div id="sidebar-filters">
+                    <button class="filter-btn active" data-filter="all">All</button>
+                    <button class="filter-btn" data-filter="needs-review">Needs Review</button>
+                    <button class="filter-btn" data-filter="reviewed">Reviewed</button>
+                </div>
+                <div id="review-summary"></div>
+                <div id="image-list"></div>
+            </div>
+
+            <!-- Canvas Area -->
+            <div id="canvas-container">
+                <div id="welcome-message">
+                    <h2>KiNet Trainer</h2>
+                    <p>3-class annotation tool for KiNet training data</p>
+                    <div class="welcome-buttons">
+                        <button id="welcome-new" class="welcome-btn">New Project</button>
+                        <button id="welcome-load" class="welcome-btn">Load Project</button>
+                        <button id="welcome-import" class="welcome-btn welcome-btn-secondary">Import kiQuant</button>
+                    </div>
+                </div>
+                <div id="canvas-viewport">
+                    <canvas id="canvas"></canvas>
+                    <canvas id="overlay-canvas"></canvas>
+                </div>
+
+                <!-- Overview Map -->
+                <div id="overview-panel" class="hidden">
+                    <canvas id="overview-canvas"></canvas>
+                    <div id="overview-viewport"></div>
+                </div>
+
+                <!-- Zoom Controls -->
+                <div id="zoom-controls" class="hidden">
+                    <button id="btn-zoom-in" class="zoom-btn" title="Zoom In (+)">+</button>
+                    <span id="zoom-level">100%</span>
+                    <button id="btn-zoom-out" class="zoom-btn" title="Zoom Out (-)">-</button>
+                    <button id="btn-zoom-fit" class="zoom-btn zoom-btn-text" title="Fit to Window (F)">Fit</button>
+                    <button id="btn-zoom-100" class="zoom-btn zoom-btn-text" title="Actual Size (1)">1:1</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Export Settings Modal -->
+        <div id="export-modal" class="modal hidden">
+            <div class="modal-content settings-modal">
+                <h2>Export Training Data</h2>
+                <div id="export-review-info" class="export-review-info"></div>
+                <div class="settings-section">
+                    <div class="setting-row">
+                        <label for="export-val-split">Validation Split</label>
+                        <input type="range" id="export-val-split" min="0.05" max="0.5" value="0.2" step="0.05">
+                        <span id="export-val-split-value" class="setting-value">20%</span>
+                        <span class="setting-hint">Fraction of images for validation</span>
+                    </div>
+                    <div class="setting-row">
+                        <label for="export-sigma">Proximity Map Sigma</label>
+                        <input type="number" id="export-sigma" min="1" max="20" value="6" step="0.5">
+                        <span class="setting-hint">Gaussian sigma for label blobs (default 6.0)</span>
+                    </div>
+                    <div class="setting-row">
+                        <label>
+                            <input type="checkbox" id="export-reviewed-only" checked>
+                            Export only reviewed images
+                        </label>
+                        <span class="setting-hint">Only export images marked as reviewed (green)</span>
+                    </div>
+                </div>
+                <div class="modal-buttons">
+                    <button id="export-cancel" class="modal-btn-secondary">Cancel</button>
+                    <button id="export-confirm" class="modal-close">Export</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tile Settings Modal -->
+        <div id="tile-modal" class="modal hidden">
+            <div class="modal-content settings-modal">
+                <h2>Prepare Images (Tile)</h2>
+                <p class="modal-description">Tile large microscopy images into training-ready patches.</p>
+                <div class="settings-section">
+                    <div class="setting-row">
+                        <label for="tile-size">Tile Size</label>
+                        <select id="tile-size" class="setting-select">
+                            <option value="256">256 x 256</option>
+                            <option value="512" selected>512 x 512 (recommended)</option>
+                            <option value="720">720 x 720 (original KiNet)</option>
+                            <option value="1024">1024 x 1024</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <label>
+                            <input type="checkbox" id="tile-skip-blank" checked>
+                            Skip blank/white tiles
+                        </label>
+                        <span class="setting-hint">Discard tiles that are mostly slide background</span>
+                    </div>
+                    <div class="setting-row">
+                        <label for="tile-blank-threshold">Blank Threshold</label>
+                        <input type="range" id="tile-blank-threshold" min="0.5" max="1.0" value="0.9" step="0.05">
+                        <span id="tile-blank-threshold-value" class="setting-value">90%</span>
+                        <span class="setting-hint">Fraction of white pixels to consider blank</span>
+                    </div>
+                </div>
+                <div class="modal-buttons">
+                    <button id="tile-cancel" class="modal-btn-secondary">Cancel</button>
+                    <button id="tile-confirm" class="modal-close">Tile Images</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detection Settings Modal -->
+        <div id="detect-modal" class="modal hidden">
+            <div class="modal-content settings-modal">
+                <h2 id="detect-modal-title">Detect Nuclei</h2>
+                <div class="settings-section">
+                    <div class="setting-row">
+                        <label for="detect-model">Model</label>
+                        <select id="detect-model" class="setting-select"></select>
+                    </div>
+                    <div class="setting-row">
+                        <label for="detect-threshold">Detection Threshold</label>
+                        <input type="range" id="detect-threshold" min="0.1" max="0.9" value="0.3" step="0.05">
+                        <span id="detect-threshold-value" class="setting-value">0.30</span>
+                    </div>
+                    <div class="setting-row">
+                        <label for="detect-min-distance">Min Distance (px)</label>
+                        <input type="number" id="detect-min-distance" min="1" max="50" value="5">
+                        <span class="setting-hint">Minimum distance between detected nuclei</span>
+                    </div>
+                </div>
+                <p class="detect-warning">This will replace existing markers on the selected image(s).</p>
+                <div class="modal-buttons">
+                    <button id="detect-cancel" class="modal-btn-secondary">Cancel</button>
+                    <button id="detect-confirm" class="modal-close">Detect</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Model Browser Modal -->
+        <div id="model-browser-modal" class="modal hidden">
+            <div class="modal-content model-browser-content">
+                <h2>Model Browser</h2>
+                <div id="model-list" class="model-list"></div>
+                <div class="modal-buttons">
+                    <button id="model-browser-close" class="modal-close">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- About Modal -->
+        <div id="about-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2>KiNet Trainer</h2>
+                <p id="about-version"></p>
+                <p>3-class annotation and training tool<br>for KiNet Ki-67 detection model.</p>
+                <p class="about-copyright">Copyright 2025-2026 Toby Cornish</p>
+                <button id="about-close" class="modal-close">OK</button>
+            </div>
+        </div>
+
+        <!-- Progress Modal -->
+        <div id="progress-modal" class="detection-progress hidden">
+            <div class="detection-progress-content">
+                <div class="detection-progress-spinner"></div>
+                <div id="progress-bar-container">
+                    <div id="progress-bar"></div>
+                </div>
+                <span id="progress-text">Processing...</span>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div id="status-bar">
+            <span id="status-filename">No image loaded</span>
+            <span id="status-mode">Mode: Positive</span>
+            <span id="status-summary"></span>
+        </div>
+    </div>
+
+    <script src="/eel.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

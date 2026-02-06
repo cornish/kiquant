@@ -124,6 +124,42 @@ AI detection requires additional packages not in base requirements:
 
 Install via `scripts/install-ai.bat` (CPU) or `scripts/install-ai-gpu.bat` (GPU).
 
+## KiNet Trainer (separate app)
+
+The `kinet-trainer/` directory contains a separate Eel app for creating KiNet training data:
+
+```
+kinet-trainer/
+├── src/
+│   ├── main.py          # Eel backend: annotation, export, model management
+│   ├── state.py         # 3-class annotation state (positive, negative, other)
+│   ├── export.py        # Proximity map generation + KiNet directory export
+│   ├── evaluate.py      # Model evaluation & metrics (CLI + GUI)
+│   ├── training/
+│   │   ├── train.py     # CLI training script (argparse)
+│   │   ├── dataset.py   # PyTorch Dataset for KiNet format
+│   │   └── augment.py   # Joint image+label augmentations
+│   └── web/             # Annotation GUI (3-class, dark theme)
+├── requirements.txt     # torch, scikit-image, Pillow, Eel, numpy, scipy
+└── scripts/
+    ├── run.bat          # Launch the GUI
+    └── train.bat        # Run training from CLI
+```
+
+**Key differences from kiQuant:**
+- 3 marker classes (positive tumor, negative tumor, non-tumor) vs 2
+- Exports proximity maps for KiNet training format
+- CLI training pipeline with weighted MSE loss
+- Import from kiQuant projects (maps 2 classes, no "other")
+- Shares `Ki67Net` model architecture from `src/detection/kinet_model.py`
+
+**Running:**
+```batch
+cd kinet-trainer\scripts
+run.bat          # GUI annotation tool
+train.bat --data-dir <exported> --epochs 100  # CLI training
+```
+
 ## Testing
 
 No automated tests. Manual testing required:
