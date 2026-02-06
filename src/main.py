@@ -402,6 +402,41 @@ def delete_marker_at(x, y):
 
 
 @eel.expose
+def delete_markers_in_radius(x, y, radius, save_history=True):
+    """Delete all markers within radius of point (x, y). Used for brush eraser."""
+    field = state.get_current_field()
+    if not field:
+        return None
+
+    x, y, radius = int(x), int(y), int(radius)
+    radius_sq = radius * radius
+
+    # Find markers within radius
+    to_delete = []
+    for i, marker in enumerate(field.markers):
+        dx = marker.x - x
+        dy = marker.y - y
+        if dx * dx + dy * dy <= radius_sq:
+            to_delete.append(i)
+
+    if to_delete and save_history:
+        _save_to_history()
+
+    # Delete in reverse order to preserve indices
+    for i in reversed(to_delete):
+        field.remove_marker(i)
+
+    return {
+        'markers': [m.to_dict() for m in field.markers],
+        'positive_count': field.get_positive_count(),
+        'negative_count': field.get_negative_count(),
+        'deleted_count': len(to_delete),
+        'can_undo': len(_get_field_history(state.current_index)['undo']) > 0,
+        'can_redo': len(_get_field_history(state.current_index)['redo']) > 0
+    }
+
+
+@eel.expose
 def delete_selected_markers():
     """Delete all selected markers."""
     field = state.get_current_field()
@@ -579,6 +614,21 @@ def select_all_markers():
         m.selected = True
 
     return {'markers': [m.to_dict() for m in field.markers]}
+
+
+@eel.expose
+def invert_selection():
+    """Invert selection of all markers on current field."""
+    field = state.get_current_field()
+    if not field:
+        return None
+
+    selected_count = field.invert_selection()
+
+    return {
+        'selected_count': selected_count,
+        'markers': [m.to_dict() for m in field.markers]
+    }
 
 
 @eel.expose

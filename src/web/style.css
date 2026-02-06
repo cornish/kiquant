@@ -166,6 +166,21 @@ body {
     content: '\2713 ';
 }
 
+.eraser-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+}
+
+.eraser-dropdown .dropdown-item.active {
+    background-color: #3a3a3a;
+}
+
+.eraser-dropdown .dropdown-item.active::before {
+    content: '\2713 ';
+}
+
 .marker-icon {
     display: inline-block;
     width: 16px;
@@ -458,9 +473,9 @@ body {
     cursor: default;
 }
 
-/* Custom eraser cursor - circle with X */
+/* Eraser mode - hide cursor since we draw custom resizable brush cursor on overlay */
 #canvas.mode-eraser {
-    cursor: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="%23ff6b6b" stroke-width="2"/><line x1="7" y1="7" x2="17" y2="17" stroke="%23ff6b6b" stroke-width="2"/><line x1="17" y1="7" x2="7" y2="17" stroke="%23ff6b6b" stroke-width="2"/></svg>') 12 12, crosshair;
+    cursor: none;
 }
 
 /* Context Menu */

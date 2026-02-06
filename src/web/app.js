@@ -69,6 +69,13 @@ let currentROI = null; // {x, y, width, height} or null
 let isDrawingROI = false;
 let roiStart = { x: 0, y: 0 };
 
+// Eraser state
+let eraserRadius = 15; // Default eraser radius in image pixels
+let isErasing = false;
+let eraserImagePos = null; // Current position in image coordinates {x, y}
+let eraserHistorySaved = false; // Track if we've saved history for current stroke
+let eraserPending = false; // Prevent overlapping erase calls
+
 // Canvas and context
 let canvas, ctx;
 let overlayCanvas, overlayCtx;
@@ -124,6 +131,8 @@ function init() {
         btnToggleGuide: document.getElementById('btn-toggle-guide'),
         btnSelectDropdown: document.getElementById('btn-select-dropdown'),
         selectMenu: document.getElementById('select-menu'),
+        btnEraserDropdown: document.getElementById('btn-eraser-dropdown'),
+        eraserMenu: document.getElementById('eraser-menu'),
         aboutModal: document.getElementById('about-modal'),
         aboutVersion: document.getElementById('about-version'),
         aboutCopyright: document.querySelector('.about-copyright'),
@@ -158,6 +167,7 @@ function init() {
         settingKinetThreshold: document.getElementById('setting-kinet-threshold'),
         settingKinetThresholdValue: document.getElementById('setting-kinet-threshold-value'),
         settingKinetDistance: document.getElementById('setting-kinet-distance'),
+        settingKinetTilesize: document.getElementById('setting-kinet-tilesize'),
         settingsReset: document.getElementById('settings-reset'),
         settingsClose: document.getElementById('settings-close'),
         // ROI elements
@@ -235,6 +245,10 @@ function bindEvents() {
     elements.btnSelectDropdown.addEventListener('click', toggleSelectMenu);
     elements.selectMenu.addEventListener('click', handleSelectMenuAction);
 
+    // Eraser size dropdown
+    elements.btnEraserDropdown.addEventListener('click', toggleEraserMenu);
+    elements.eraserMenu.addEventListener('click', handleEraserMenuAction);
+
     // Context menu events
     document.querySelectorAll('.context-menu-item').forEach(item => {
         item.addEventListener('click', handleContextMenuAction);
@@ -250,6 +264,11 @@ function bindEvents() {
         // Hide select menu
         if (!elements.selectMenu.contains(e.target) && !elements.btnSelectDropdown.contains(e.target)) {
             hideSelectMenu();
+        }
+
+        // Hide eraser menu
+        if (!elements.eraserMenu.contains(e.target) && !elements.btnEraserDropdown.contains(e.target)) {
+            hideEraserMenu();
         }
 
         // Hide context menu
@@ -505,6 +524,36 @@ function handleSelectMenuAction(e) {
 
     // Switch to select mode when changing selection type
     setMode(Mode.SELECT);
+}
+
+// ============== Eraser Size Menu ==============
+
+function toggleEraserMenu(e) {
+    e.stopPropagation();
+    elements.eraserMenu.classList.toggle('hidden');
+    updateEraserMenuUI();
+}
+
+function hideEraserMenu() {
+    elements.eraserMenu.classList.add('hidden');
+}
+
+function updateEraserMenuUI() {
+    document.querySelectorAll('#eraser-menu .dropdown-item').forEach(item => {
+        item.classList.toggle('active', parseInt(item.dataset.eraserSize) === eraserRadius);
+    });
+}
+
+function handleEraserMenuAction(e) {
+    const item = e.target.closest('.dropdown-item');
+    if (!item) return;
+
+    eraserRadius = parseInt(item.dataset.eraserSize);
+    hideEraserMenu();
+    updateEraserMenuUI();
+
+    // Switch to eraser mode when changing eraser size
+    setMode(Mode.ERASER);
 }
 
 // ============== Undo/Redo ==============
@@ -890,6 +939,11 @@ function panToOverviewPoint(e) {
 // ============== Mode Handling ==============
 
 function setMode(mode) {
+    // Clear eraser state when leaving eraser mode
+    if (currentMode === Mode.ERASER && mode !== Mode.ERASER) {
+        eraserImagePos = null;
+        isErasing = false;
+    }
     currentMode = mode;
     eel.set_mode(mode);
     updateModeUI();
@@ -1010,6 +1064,14 @@ async function handleContextMenuAction(e) {
             }
             break;
 
+        case 'invert-selection':
+            const invertResult = await eel.invert_selection()();
+            if (invertResult) {
+                markers = invertResult.markers;
+                render();
+            }
+            break;
+
         case 'change-positive':
             const posResult = await eel.convert_selected_markers(MarkerClass.POSITIVE)();
             if (posResult) {
@@ -1115,15 +1177,11 @@ async function handleCanvasMouseDown(e) {
         }
     } else if (currentMode === Mode.ERASER) {
         if (isLeftClick) {
-            const result = await eel.delete_marker_at(coords.x, coords.y)();
-            if (result) {
-                markers = result.markers;
-                updateCounts(result.positive_count, result.negative_count);
-                updateUndoRedoButtons(result.can_undo, result.can_redo);
-                markUnsavedChanges();
-                render();
-                renderOverview();
-            }
+            isErasing = true;
+            eraserHistorySaved = false;
+            eraserImagePos = { x: coords.x, y: coords.y };
+            // Delete markers at initial click position (non-blocking)
+            eraseAtPosition(coords.x, coords.y);
         }
     } else if (currentMode === Mode.ROI) {
         if (isLeftClick) {
@@ -1152,6 +1210,19 @@ function handleCanvasMouseMove(e) {
         dragEnd = coords;
         render();
         drawROIPreviewOnOverlay(coords);
+        return;
+    }
+
+    // Handle eraser cursor and continuous erasing
+    if (currentMode === Mode.ERASER) {
+        const coords = getImageCoords(e);
+        eraserImagePos = { x: coords.x, y: coords.y };
+
+        if (isErasing && !eraserPending) {
+            eraseAtPosition(coords.x, coords.y);
+        }
+        // Always render to update cursor
+        render();
         return;
     }
 
@@ -1266,6 +1337,65 @@ function drawSelectionOnOverlay(currentCoords) {
     }
 }
 
+// ============== Eraser Functions ==============
+
+function eraseAtPosition(imgX, imgY) {
+    // Prevent overlapping calls
+    if (eraserPending) return;
+    eraserPending = true;
+
+    // Save history only once per stroke
+    const saveHistory = !eraserHistorySaved;
+    if (saveHistory) {
+        eraserHistorySaved = true;
+    }
+
+    // Fire-and-forget for smooth dragging
+    eel.delete_markers_in_radius(imgX, imgY, eraserRadius, saveHistory)().then(result => {
+        eraserPending = false;
+        if (result && result.deleted_count > 0) {
+            markers = result.markers;
+            updateCounts(result.positive_count, result.negative_count);
+            updateUndoRedoButtons(result.can_undo, result.can_redo);
+            markUnsavedChanges();
+            render();
+        }
+    }).catch(() => {
+        eraserPending = false;
+    });
+}
+
+function drawEraserCursorOnOverlay(imgLeft, imgTop) {
+    // Called from renderOverlayMarkers, draws on existing overlay without clearing
+    if (!eraserImagePos || currentMode !== Mode.ERASER) return;
+
+    // Convert image coordinates to screen coordinates (same as markers)
+    const screenRadius = eraserRadius * zoom;
+    const x = imgLeft + eraserImagePos.x * zoom;
+    const y = imgTop + eraserImagePos.y * zoom;
+
+    // Draw eraser circle
+    overlayCtx.beginPath();
+    overlayCtx.arc(x, y, screenRadius, 0, Math.PI * 2);
+    overlayCtx.strokeStyle = '#ff4444';
+    overlayCtx.lineWidth = 2;
+    overlayCtx.stroke();
+
+    // Draw subtle fill
+    overlayCtx.fillStyle = 'rgba(255, 68, 68, 0.15)';
+    overlayCtx.fill();
+
+    // Draw crosshair at center
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(x - 5, y);
+    overlayCtx.lineTo(x + 5, y);
+    overlayCtx.moveTo(x, y - 5);
+    overlayCtx.lineTo(x, y + 5);
+    overlayCtx.strokeStyle = '#ff4444';
+    overlayCtx.lineWidth = 1;
+    overlayCtx.stroke();
+}
+
 async function handleCanvasMouseUp(e) {
     if (isPanning) {
         isPanning = false;
@@ -1290,6 +1420,14 @@ async function handleCanvasMouseUp(e) {
         } else {
             render(); // Clear preview
         }
+        return;
+    }
+
+    // Handle eraser stroke end
+    if (currentMode === Mode.ERASER && isErasing) {
+        isErasing = false;
+        eraserHistorySaved = false;
+        renderOverview();
         return;
     }
 
@@ -1384,6 +1522,16 @@ function handleCanvasMouseLeave() {
         isPanning = false;
         canvas.classList.remove('panning');
     }
+    if (isErasing) {
+        isErasing = false;
+        eraserHistorySaved = false;
+        renderOverview();
+    }
+    // Clear eraser cursor
+    if (currentMode === Mode.ERASER) {
+        eraserImagePos = null;
+        render();
+    }
 }
 
 // ============== Keyboard Handlers ==============
@@ -1410,6 +1558,16 @@ async function handleKeyDown(e) {
                 e.preventDefault();
                 if (isProjectLoaded) {
                     const result = await eel.select_all_markers()();
+                    if (result) {
+                        markers = result.markers;
+                        render();
+                    }
+                }
+                return;
+            case 'i':
+                e.preventDefault();
+                if (isProjectLoaded) {
+                    const result = await eel.invert_selection()();
                     if (result) {
                         markers = result.markers;
                         render();
@@ -1558,6 +1716,9 @@ function renderOverlayMarkers(viewWidth, viewHeight, imgLeft, imgTop) {
 
         drawMarkerOnOverlay(marker, screenX, screenY, inROI ? 1.0 : 0.3);
     });
+
+    // Draw eraser cursor on top of everything else
+    drawEraserCursorOnOverlay(imgLeft, imgTop);
 }
 
 function drawGuideOnOverlay(imgLeft, imgTop) {
@@ -1862,6 +2023,7 @@ function resetDetectionSettings() {
     elements.settingKinetThreshold.value = 0.3;
     elements.settingKinetThresholdValue.textContent = '0.30';
     elements.settingKinetDistance.value = 5;
+    elements.settingKinetTilesize.value = 1024;
 }
 
 function getDetectionSettings() {
@@ -1875,7 +2037,8 @@ function getDetectionSettings() {
         nms_thresh: parseFloat(elements.settingNms.value),
         // KiNet
         threshold: parseFloat(elements.settingKinetThreshold.value),
-        min_distance: parseInt(elements.settingKinetDistance.value) || 5
+        min_distance: parseInt(elements.settingKinetDistance.value) || 5,
+        tile_size: parseInt(elements.settingKinetTilesize.value) || 1024
     };
 }
 

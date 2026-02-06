@@ -142,7 +142,7 @@ class KiNetDetector(BaseDetector):
         Args:
             image: RGB image as numpy array (H, W, 3) with dtype uint8.
             progress_callback: Optional callback for progress updates.
-            settings: Optional dict with 'min_distance', 'threshold'.
+            settings: Optional dict with 'min_distance', 'threshold', 'tile_size'.
 
         Returns:
             List of DetectedNucleus objects with classification.
@@ -157,11 +157,14 @@ class KiNetDetector(BaseDetector):
             progress_callback("Running KiNet detection...", 0.1)
 
         import torch
-        from skimage.feature import peak_local_max
 
         # Get parameters
         min_distance = settings.get('min_distance', 5)
         threshold = settings.get('threshold', 0.3)
+        # Tile size for processing large images (default 1024, 0 = no tiling)
+        tile_size = settings.get('tile_size', 1024)
+        # Overlap between tiles to avoid boundary artifacts
+        tile_overlap = settings.get('tile_overlap', 128)
 
         # Prepare image for model
         # KiNet expects RGB float32 normalized to [0, 1]
@@ -171,6 +174,50 @@ class KiNetDetector(BaseDetector):
             image_float = image.astype(np.float32)
             if image_float.max() > 1.0:
                 image_float = image_float / 255.0
+
+        h, w = image_float.shape[:2]
+
+        # Clear CUDA cache before processing
+        if self._device.type == 'cuda':
+            torch.cuda.empty_cache()
+
+        # Decide whether to use tiled processing
+        # Use tiling if image is larger than tile_size and tiling is enabled
+        use_tiling = tile_size > 0 and (h > tile_size or w > tile_size)
+
+        if use_tiling:
+            voting_maps = self._process_tiled(
+                image_float, tile_size, tile_overlap, progress_callback
+            )
+        else:
+            voting_maps = self._process_whole(image_float, progress_callback)
+
+        if progress_callback:
+            progress_callback("Extracting nuclei...", 0.85)
+
+        # Extract nuclei from voting maps
+        nuclei = self._extract_nuclei(
+            voting_maps,
+            min_distance=min_distance,
+            threshold=threshold
+        )
+
+        # Final CUDA cache cleanup
+        if self._device.type == 'cuda':
+            torch.cuda.empty_cache()
+
+        if progress_callback:
+            progress_callback(f"Detected {len(nuclei)} nuclei", 1.0)
+
+        return nuclei
+
+    def _process_whole(
+        self,
+        image_float: np.ndarray,
+        progress_callback: Optional[Callable] = None
+    ) -> np.ndarray:
+        """Process the entire image at once (for small images)."""
+        import torch
 
         # Convert to tensor (B, C, H, W)
         image_tensor = torch.from_numpy(image_float).permute(2, 0, 1).unsqueeze(0)
@@ -184,20 +231,135 @@ class KiNetDetector(BaseDetector):
             voting_maps = self._model(image_tensor)
             voting_maps = voting_maps.cpu().numpy()[0]  # (3, H, W)
 
+        return voting_maps
+
+    def _process_tiled(
+        self,
+        image_float: np.ndarray,
+        tile_size: int,
+        overlap: int,
+        progress_callback: Optional[Callable] = None
+    ) -> np.ndarray:
+        """
+        Process image in overlapping tiles to handle large images.
+
+        Uses overlapping tiles and blends results to avoid boundary artifacts.
+        """
+        import torch
+
+        h, w = image_float.shape[:2]
+
+        # Initialize output voting maps
+        voting_maps = np.zeros((3, h, w), dtype=np.float32)
+        # Weight map for blending overlapping regions
+        weight_map = np.zeros((h, w), dtype=np.float32)
+
+        # Calculate tile positions with overlap
+        step = tile_size - overlap
+        y_positions = list(range(0, h - overlap, step))
+        x_positions = list(range(0, w - overlap, step))
+
+        # Ensure we cover the entire image
+        if y_positions[-1] + tile_size < h:
+            y_positions.append(h - tile_size)
+        if x_positions[-1] + tile_size < w:
+            x_positions.append(w - tile_size)
+
+        total_tiles = len(y_positions) * len(x_positions)
+        tile_idx = 0
+
         if progress_callback:
-            progress_callback("Extracting nuclei...", 0.7)
+            progress_callback(f"Processing {total_tiles} tiles...", 0.2)
 
-        # Extract nuclei from voting maps
-        nuclei = self._extract_nuclei(
-            voting_maps,
-            min_distance=min_distance,
-            threshold=threshold
-        )
+        # Create blending weights (cosine taper at edges)
+        blend_weights = self._create_blend_weights(tile_size, overlap)
 
-        if progress_callback:
-            progress_callback(f"Detected {len(nuclei)} nuclei", 1.0)
+        for y_start in y_positions:
+            for x_start in x_positions:
+                tile_idx += 1
 
-        return nuclei
+                # Extract tile (handle edge cases)
+                y_end = min(y_start + tile_size, h)
+                x_end = min(x_start + tile_size, w)
+                actual_h = y_end - y_start
+                actual_w = x_end - x_start
+
+                tile = image_float[y_start:y_end, x_start:x_end]
+
+                # Pad tile if it's smaller than tile_size (edge tiles)
+                if actual_h < tile_size or actual_w < tile_size:
+                    padded_tile = np.zeros((tile_size, tile_size, 3), dtype=np.float32)
+                    padded_tile[:actual_h, :actual_w] = tile
+                    tile = padded_tile
+
+                # Convert to tensor
+                tile_tensor = torch.from_numpy(tile).permute(2, 0, 1).unsqueeze(0)
+                tile_tensor = tile_tensor.to(self._device)
+
+                # Run inference on tile
+                with torch.no_grad():
+                    tile_output = self._model(tile_tensor)
+                    tile_output = tile_output.cpu().numpy()[0]  # (3, H, W)
+
+                # Clear intermediate tensors
+                del tile_tensor
+                if self._device.type == 'cuda':
+                    torch.cuda.empty_cache()
+
+                # Crop output to actual tile size if padded
+                tile_output = tile_output[:, :actual_h, :actual_w]
+
+                # Get weights for this tile
+                tile_weights = blend_weights[:actual_h, :actual_w]
+
+                # Adjust weights at image boundaries (no blending needed at edges)
+                if y_start == 0:
+                    tile_weights[:overlap//2, :] = 1.0
+                if x_start == 0:
+                    tile_weights[:, :overlap//2] = 1.0
+                if y_end == h:
+                    tile_weights[-(overlap//2):, :] = 1.0
+                if x_end == w:
+                    tile_weights[:, -(overlap//2):] = 1.0
+
+                # Accumulate results with weights
+                for c in range(3):
+                    voting_maps[c, y_start:y_end, x_start:x_end] += tile_output[c] * tile_weights
+                weight_map[y_start:y_end, x_start:x_end] += tile_weights
+
+                # Update progress
+                if progress_callback:
+                    progress = 0.2 + 0.6 * (tile_idx / total_tiles)
+                    progress_callback(f"Processing tile {tile_idx}/{total_tiles}...", progress)
+
+        # Normalize by weights
+        weight_map = np.maximum(weight_map, 1e-8)  # Avoid division by zero
+        for c in range(3):
+            voting_maps[c] /= weight_map
+
+        return voting_maps
+
+    def _create_blend_weights(self, tile_size: int, overlap: int) -> np.ndarray:
+        """
+        Create blending weights with cosine taper at edges.
+
+        Returns weights that smoothly transition from 0 at edges to 1 in the center,
+        ensuring seamless blending of overlapping tiles.
+        """
+        # Create 1D weight profile
+        weights_1d = np.ones(tile_size, dtype=np.float32)
+
+        # Cosine taper for overlap region
+        taper_length = overlap // 2
+        if taper_length > 0:
+            taper = 0.5 * (1 - np.cos(np.linspace(0, np.pi, taper_length)))
+            weights_1d[:taper_length] = taper
+            weights_1d[-taper_length:] = taper[::-1]
+
+        # Create 2D weights
+        weights_2d = np.outer(weights_1d, weights_1d)
+
+        return weights_2d
 
     def _extract_nuclei(
         self,

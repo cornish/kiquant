@@ -126,6 +126,15 @@ class Field:
         for m in self.markers:
             m.selected = False
 
+    def invert_selection(self) -> int:
+        """Invert selection state of all markers. Returns count now selected."""
+        count = 0
+        for m in self.markers:
+            m.selected = not m.selected
+            if m.selected:
+                count += 1
+        return count
+
     def select_marker_at(self, x: int, y: int) -> Optional[Marker]:
         """Select marker at point. Returns the marker if found."""
         for m in self.markers:
