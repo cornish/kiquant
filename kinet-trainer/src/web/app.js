@@ -1443,10 +1443,6 @@ async function handleDetectConfirm() {
         // Refresh sidebar for all cases
         await updateImageList();
         updateReviewSummary();
-        const msg = detectMode === 'all'
-            ? result.message
-            : `Detected ${result.detected_count} markers`;
-        alert(msg);
     } else if (result) {
         alert(result.message || 'Detection failed');
     }
