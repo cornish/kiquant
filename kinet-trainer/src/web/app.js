@@ -231,6 +231,10 @@ function bindEvents() {
     document.addEventListener('mousemove', handleOverviewMouseMove);
     document.addEventListener('mouseup', handleOverviewMouseUp);
 
+    // Document-level handlers for selection/pan continuation outside canvas
+    document.addEventListener('mousemove', handleDocumentMouseMove);
+    document.addEventListener('mouseup', handleDocumentMouseUp);
+
     // Zoom controls
     elements.btnZoomIn.addEventListener('click', () => setZoom(zoom + ZOOM_STEP));
     elements.btnZoomOut.addEventListener('click', () => setZoom(zoom - ZOOM_STEP));
@@ -1042,6 +1046,19 @@ function getImageCoords(e) {
     return { x: Math.round(imgX), y: Math.round(imgY) };
 }
 
+function getClampedImageCoords(e) {
+    // Get image coords, clamped to image bounds (for selection that continues outside viewport)
+    const rect = canvas.getBoundingClientRect();
+    const imgX = (e.clientX - rect.left) / zoom;
+    const imgY = (e.clientY - rect.top) / zoom;
+    const maxX = currentImage ? currentImage.width : 0;
+    const maxY = currentImage ? currentImage.height : 0;
+    return {
+        x: Math.round(Math.max(0, Math.min(imgX, maxX))),
+        y: Math.round(Math.max(0, Math.min(imgY, maxY)))
+    };
+}
+
 async function handleCanvasMouseDown(e) {
     if (!isProjectLoaded || !currentImage) return;
 
@@ -1175,16 +1192,9 @@ function handleCanvasMouseUp(e) {
     }
 }
 
-function handleCanvasMouseLeave() {
-    if (isPanning) {
-        isPanning = false;
-        canvas.classList.remove('panning');
-    }
-    if (isSelecting) {
-        isSelecting = false;
-        lassoPoints = [];
-        render();
-    }
+function handleCanvasMouseLeave(e) {
+    // Don't cancel selection or panning - let document handlers continue tracking
+    // Only cancel eraser (we don't want eraser to work outside canvas)
     if (isErasing) {
         isErasing = false;
         eraserHistorySaved = false;
@@ -1192,6 +1202,67 @@ function handleCanvasMouseLeave() {
     }
     if (currentMode === Mode.ERASER) {
         eraserImagePos = null;
+        render();
+    }
+}
+
+function handleDocumentMouseMove(e) {
+    // Continue selection/pan even when outside canvas (only if not already on canvas)
+    if (e.target === canvas) return;
+
+    if (isSelecting && currentMode === Mode.SELECT) {
+        const coords = getClampedImageCoords(e);
+        selectionEndX = coords.x;
+        selectionEndY = coords.y;
+
+        if (selectionType === 'lasso') {
+            const lastPoint = lassoPoints[lassoPoints.length - 1];
+            const dist = Math.sqrt(Math.pow(coords.x - lastPoint.x, 2) +
+                                   Math.pow(coords.y - lastPoint.y, 2));
+            if (dist > 3) {
+                lassoPoints.push(coords);
+            }
+        }
+        render();
+    }
+
+    if (isPanning) {
+        const dx = e.clientX - panStartX;
+        const dy = e.clientY - panStartY;
+        panX = lastPanX + dx;
+        panY = lastPanY + dy;
+        constrainPan();
+        render();
+        updateOverviewViewport();
+    }
+}
+
+function handleDocumentMouseUp(e) {
+    // Finish selection/pan even when outside canvas (only if not already on canvas)
+    if (e.target === canvas) return;
+
+    if (isPanning) {
+        isPanning = false;
+        canvas.classList.remove('panning');
+    }
+
+    if (isSelecting && currentMode === Mode.SELECT) {
+        isSelecting = false;
+        const coords = getClampedImageCoords(e);
+
+        if (selectionType === 'lasso' && lassoPoints.length > 2) {
+            lassoPoints.push(coords);
+            selectMarkersInPolygon(lassoPoints);
+            lassoPoints = [];
+        } else if (selectionType === 'rect') {
+            const x = Math.min(selectionStartX, selectionEndX);
+            const y = Math.min(selectionStartY, selectionEndY);
+            const w = Math.abs(selectionEndX - selectionStartX);
+            const h = Math.abs(selectionEndY - selectionStartY);
+            if (w > 2 || h > 2) {
+                selectMarkersInRect(x, y, w, h);
+            }
+        }
         render();
     }
 }
