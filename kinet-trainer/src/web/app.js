@@ -1672,6 +1672,7 @@ function handleKeyUp(e) {
             if (eraserHeldMode !== null) {
                 setMode(eraserHeldMode);
                 eraserHeldMode = null;
+                render(); // Clear eraser cursor from overlay
             }
             break;
     }
