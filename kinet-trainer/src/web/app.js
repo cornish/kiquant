@@ -70,6 +70,8 @@ let selectionStartX = 0;
 let selectionStartY = 0;
 let selectionEndX = 0;
 let selectionEndY = 0;
+let selectionType = 'rect'; // 'rect' or 'lasso'
+let lassoPoints = []; // For lasso selection
 
 // Overview drag state
 let isOverviewDragging = false;
@@ -165,7 +167,13 @@ function init() {
         // Progress
         progressModal: document.getElementById('progress-modal'),
         progressBar: document.getElementById('progress-bar'),
-        progressText: document.getElementById('progress-text')
+        progressText: document.getElementById('progress-text'),
+        // Selection dropdown
+        btnSelectDropdown: document.getElementById('btn-select-dropdown'),
+        selectMenu: document.getElementById('select-menu'),
+        // Eraser dropdown
+        btnEraserDropdown: document.getElementById('btn-eraser-dropdown'),
+        eraserMenu: document.getElementById('eraser-menu')
     };
 
     canvas = elements.canvas;
@@ -234,6 +242,14 @@ function bindEvents() {
         if (!elements.fileMenu.contains(e.target) && !elements.btnFile.contains(e.target)) {
             hideFileMenu();
         }
+        // Hide select menu
+        if (!elements.selectMenu.contains(e.target) && !elements.btnSelectDropdown.contains(e.target)) {
+            elements.selectMenu.classList.add('hidden');
+        }
+        // Hide eraser menu
+        if (!elements.eraserMenu.contains(e.target) && !elements.btnEraserDropdown.contains(e.target)) {
+            elements.eraserMenu.classList.add('hidden');
+        }
     }, true);
 
     // Keyboard shortcuts
@@ -257,6 +273,14 @@ function bindEvents() {
             applySidebarFilter();
         });
     });
+
+    // Selection type dropdown
+    elements.btnSelectDropdown.addEventListener('click', toggleSelectMenu);
+    elements.selectMenu.addEventListener('click', handleSelectMenuAction);
+
+    // Eraser size dropdown
+    elements.btnEraserDropdown.addEventListener('click', toggleEraserMenu);
+    elements.eraserMenu.addEventListener('click', handleEraserMenuAction);
 
     // About modal
     elements.aboutClose.addEventListener('click', () => elements.aboutModal.classList.add('hidden'));
@@ -384,6 +408,60 @@ function toggleFileMenu(e) {
 
 function hideFileMenu() {
     elements.fileMenu.classList.add('hidden');
+}
+
+// ============== Selection Menu ==============
+
+function toggleSelectMenu(e) {
+    e.stopPropagation();
+    elements.selectMenu.classList.toggle('hidden');
+    elements.eraserMenu.classList.add('hidden');
+    updateSelectMenuUI();
+}
+
+function updateSelectMenuUI() {
+    document.querySelectorAll('#select-menu .dropdown-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.selectType === selectionType);
+    });
+}
+
+function handleSelectMenuAction(e) {
+    const item = e.target.closest('.dropdown-item');
+    if (!item) return;
+
+    selectionType = item.dataset.selectType;
+    updateSelectMenuUI();
+    elements.selectMenu.classList.add('hidden');
+
+    // Switch to select mode when changing selection type
+    setMode(Mode.SELECT);
+}
+
+// ============== Eraser Menu ==============
+
+function toggleEraserMenu(e) {
+    e.stopPropagation();
+    elements.eraserMenu.classList.toggle('hidden');
+    elements.selectMenu.classList.add('hidden');
+    updateEraserMenuUI();
+}
+
+function updateEraserMenuUI() {
+    document.querySelectorAll('#eraser-menu .dropdown-item').forEach(item => {
+        item.classList.toggle('active', parseInt(item.dataset.eraserSize) === eraserRadius);
+    });
+}
+
+function handleEraserMenuAction(e) {
+    const item = e.target.closest('.dropdown-item');
+    if (!item) return;
+
+    eraserRadius = parseInt(item.dataset.eraserSize);
+    updateEraserMenuUI();
+    elements.eraserMenu.classList.add('hidden');
+
+    // Switch to eraser mode when changing eraser size
+    setMode(Mode.ERASER);
 }
 
 async function handleFileMenuAction(e) {
@@ -1003,6 +1081,9 @@ async function handleCanvasMouseDown(e) {
             selectionStartY = coords.y;
             selectionEndX = coords.x;
             selectionEndY = coords.y;
+            if (selectionType === 'lasso') {
+                lassoPoints = [coords];
+            }
         }
     } else if (currentMode === Mode.ERASER) {
         if (isLeftClick) {
@@ -1030,6 +1111,17 @@ function handleCanvasMouseMove(e) {
         const coords = getImageCoords(e);
         selectionEndX = coords.x;
         selectionEndY = coords.y;
+
+        if (selectionType === 'lasso') {
+            // Add point to lasso path (throttle to avoid too many points)
+            const lastPoint = lassoPoints[lassoPoints.length - 1];
+            const dist = Math.sqrt(Math.pow(coords.x - lastPoint.x, 2) +
+                                   Math.pow(coords.y - lastPoint.y, 2));
+            if (dist > 3) {
+                lassoPoints.push(coords);
+            }
+        }
+
         render();
         return;
     }
@@ -1054,13 +1146,23 @@ function handleCanvasMouseUp(e) {
 
     if (currentMode === Mode.SELECT && isSelecting) {
         isSelecting = false;
-        const x = Math.min(selectionStartX, selectionEndX);
-        const y = Math.min(selectionStartY, selectionEndY);
-        const w = Math.abs(selectionEndX - selectionStartX);
-        const h = Math.abs(selectionEndY - selectionStartY);
-        if (w > 2 || h > 2) {
-            selectMarkersInRect(x, y, w, h);
+
+        if (selectionType === 'lasso' && lassoPoints.length > 2) {
+            // Close the lasso and select markers inside polygon
+            const coords = getImageCoords(e);
+            lassoPoints.push(coords);
+            selectMarkersInPolygon(lassoPoints);
+            lassoPoints = [];
+        } else if (selectionType === 'rect') {
+            const x = Math.min(selectionStartX, selectionEndX);
+            const y = Math.min(selectionStartY, selectionEndY);
+            const w = Math.abs(selectionEndX - selectionStartX);
+            const h = Math.abs(selectionEndY - selectionStartY);
+            if (w > 2 || h > 2) {
+                selectMarkersInRect(x, y, w, h);
+            }
         }
+
         render();
         return;
     }
@@ -1080,6 +1182,7 @@ function handleCanvasMouseLeave() {
     }
     if (isSelecting) {
         isSelecting = false;
+        lassoPoints = [];
         render();
     }
     if (isErasing) {
@@ -1679,20 +1782,62 @@ async function selectMarkersInRect(x, y, width, height) {
     }
 }
 
+async function selectMarkersInPolygon(points) {
+    if (!isProjectLoaded || points.length < 3) return;
+    const result = await eel.select_markers_in_polygon(points)();
+    if (result) {
+        markers = result.markers;
+        render();
+    }
+}
+
 function drawSelectionRect(imgLeft, imgTop) {
     if (!isSelecting) return;
 
-    const x1 = imgLeft + Math.min(selectionStartX, selectionEndX) * zoom;
-    const y1 = imgTop + Math.min(selectionStartY, selectionEndY) * zoom;
-    const w = Math.abs(selectionEndX - selectionStartX) * zoom;
-    const h = Math.abs(selectionEndY - selectionStartY) * zoom;
+    if (selectionType === 'lasso' && lassoPoints.length > 1) {
+        // Draw lasso path
+        overlayCtx.strokeStyle = '#0078d4';
+        overlayCtx.lineWidth = 2;
+        overlayCtx.setLineDash([5, 5]);
 
-    overlayCtx.strokeStyle = '#0078d4';
-    overlayCtx.lineWidth = 2;
-    overlayCtx.setLineDash([5, 5]);
-    overlayCtx.strokeRect(x1, y1, w, h);
-    overlayCtx.setLineDash([]);
+        overlayCtx.beginPath();
+        const first = lassoPoints[0];
+        overlayCtx.moveTo(imgLeft + first.x * zoom, imgTop + first.y * zoom);
 
-    overlayCtx.fillStyle = 'rgba(0, 120, 212, 0.1)';
-    overlayCtx.fillRect(x1, y1, w, h);
+        for (let i = 1; i < lassoPoints.length; i++) {
+            const pt = lassoPoints[i];
+            overlayCtx.lineTo(imgLeft + pt.x * zoom, imgTop + pt.y * zoom);
+        }
+
+        // Draw line to current mouse position
+        overlayCtx.lineTo(imgLeft + selectionEndX * zoom, imgTop + selectionEndY * zoom);
+        overlayCtx.stroke();
+        overlayCtx.setLineDash([]);
+
+        // Fill the lasso area
+        overlayCtx.fillStyle = 'rgba(0, 120, 212, 0.1)';
+        overlayCtx.beginPath();
+        overlayCtx.moveTo(imgLeft + first.x * zoom, imgTop + first.y * zoom);
+        for (let i = 1; i < lassoPoints.length; i++) {
+            const pt = lassoPoints[i];
+            overlayCtx.lineTo(imgLeft + pt.x * zoom, imgTop + pt.y * zoom);
+        }
+        overlayCtx.lineTo(imgLeft + selectionEndX * zoom, imgTop + selectionEndY * zoom);
+        overlayCtx.closePath();
+        overlayCtx.fill();
+    } else if (selectionType === 'rect') {
+        const x1 = imgLeft + Math.min(selectionStartX, selectionEndX) * zoom;
+        const y1 = imgTop + Math.min(selectionStartY, selectionEndY) * zoom;
+        const w = Math.abs(selectionEndX - selectionStartX) * zoom;
+        const h = Math.abs(selectionEndY - selectionStartY) * zoom;
+
+        overlayCtx.strokeStyle = '#0078d4';
+        overlayCtx.lineWidth = 2;
+        overlayCtx.setLineDash([5, 5]);
+        overlayCtx.strokeRect(x1, y1, w, h);
+        overlayCtx.setLineDash([]);
+
+        overlayCtx.fillStyle = 'rgba(0, 120, 212, 0.1)';
+        overlayCtx.fillRect(x1, y1, w, h);
+    }
 }

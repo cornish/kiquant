@@ -380,7 +380,7 @@ kinet-trainer/
 
 ## Architecture Notes
 
-- **Shared model**: Uses `Ki67Net` from `src/detection/kinet_model.py` (the main kiQuant repo). The training script adds it to `sys.path` automatically.
+- **Shared model**: Uses `Ki67Net` from `kinet/model.py` (the repo root shared package). Both apps add the repo root to `sys.path` for clean imports like `from kinet import Ki67Net`.
 - **Model registry**: All trained models are tracked at `~/.kiquant/models/registry.json` with lineage, metrics, and training data references.
 - **Self-contained weights**: Base model weights are downloaded independently by the trainer — no kiQuant dependency.
 - **Same tech stack as kiQuant**: Python + Eel + HTML5 Canvas. Dark theme. Same zoom/pan/overlay rendering patterns.

@@ -12,6 +12,11 @@ from io import BytesIO
 from tkinter import Tk, filedialog
 from PIL import Image
 
+# Add repo root to path for kinet package
+_repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
 from state import State, Field, Marker, MarkerClass, Mode, ReviewStatus
 from export import export_training_data
 from image_prep import tile_images
@@ -550,6 +555,34 @@ def select_markers_in_rect(x, y, width, height):
     return _marker_response()
 
 
+def _point_in_polygon(x, y, polygon):
+    """Check if point (x, y) is inside polygon using ray casting."""
+    n = len(polygon)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = polygon[i]['x'], polygon[i]['y']
+        xj, yj = polygon[j]['x'], polygon[j]['y']
+        if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+@eel.expose
+def select_markers_in_polygon(points):
+    """Select all markers within polygon (lasso selection)."""
+    field = state.get_current_field()
+    if not field:
+        return None
+    if len(points) < 3:
+        return _marker_response()
+    for m in field.markers:
+        if _point_in_polygon(m.x, m.y, points):
+            m.selected = True
+    return _marker_response()
+
+
 @eel.expose
 def change_selected_class(new_class):
     """Change class of all selected markers."""
@@ -697,58 +730,29 @@ def set_default_model(model_id):
 
 # ============== Detection ==============
 
-def _load_detection_model(model_id):
-    """Load a KiNet model for detection. Returns (model, device) or raises."""
-    # Add kiQuant's detection module to path
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    kiquant_detection = os.path.join(repo_root, 'src', 'detection')
-    if kiquant_detection not in sys.path:
-        sys.path.insert(0, kiquant_detection)
-
-    from evaluate import load_model
-
-    entry = model_registry.get_model(model_id)
-    if not entry:
-        raise ValueError(f"Model '{model_id}' not found in registry")
-
-    weights_path = entry['path']
-    if not os.path.exists(weights_path):
-        raise FileNotFoundError(f"Weights file not found: {weights_path}")
-
-    return load_model(weights_path)
-
-
 def _run_detection_on_field(field_obj, threshold=0.3, min_distance=5):
-    """Run detection on a single field using kiQuant's KiNetDetector."""
+    """Run detection on a single field using KiNetDetector."""
     import numpy as np
     from PIL import Image as PILImage
-
-    # Use kiQuant's detection module directly
-    # Path: kinet-trainer/src/main.py -> kinet-trainer/src -> kinet-trainer -> repo root -> src/detection
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    kiquant_detection = os.path.join(repo_root, 'src', 'detection')
-    if kiquant_detection not in sys.path:
-        sys.path.insert(0, kiquant_detection)
-
-    from kinet_detector import KiNetDetector
+    from kinet.kinet_detector import KiNetDetector
 
     img = PILImage.open(field_obj.filepath).convert('RGB')
     img_np = np.array(img)
 
-    # Use kiQuant's detector with same settings
+    # Use shared KiNet detector with 3-class output
     detector = KiNetDetector()
     settings = {
         'threshold': threshold,
         'min_distance': min_distance,
-        'tile_size': 1024  # Match kiQuant default
+        'tile_size': 1024,
+        'include_other': True  # Trainer uses all 3 classes
     }
     nuclei = detector.detect(img_np, settings=settings)
 
     # Convert DetectedNucleus to Marker objects
     new_markers = []
     for nucleus in nuclei:
-        # KiNet returns marker_class: 0=positive, 1=negative
-        # For trainer we also need class 2 (other), but KiNet doesn't detect those
+        # KiNet returns marker_class: 0=positive, 1=negative, 2=other
         mc = nucleus.marker_class if nucleus.marker_class is not None else 1
         new_markers.append(Marker(
             marker_class=int(mc),
@@ -883,14 +887,7 @@ def evaluate_model(weights_path=None):
         return {'success': False, 'message': 'No images loaded'}
 
     try:
-        # Add parent src/detection to path for kinet_model import
-        kiquant_detection = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            'src', 'detection'
-        )
-        if kiquant_detection not in sys.path:
-            sys.path.insert(0, kiquant_detection)
-
+        # evaluate.py handles its own path setup for kinet_model import
         from evaluate import evaluate_on_fields
 
         def progress_callback(message, progress):

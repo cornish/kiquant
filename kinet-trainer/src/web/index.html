@@ -53,12 +53,28 @@
                 <button id="btn-other" class="mode-btn" data-mode="2" title="Non-tumor / Other (O)">
                     <span class="marker-icon other">o</span> Other
                 </button>
-                <button id="btn-select" class="mode-btn" data-mode="3" title="Select Mode (S)">
-                    Select
-                </button>
-                <button id="btn-eraser" class="mode-btn" data-mode="4" title="Eraser Mode (E)">
-                    Eraser
-                </button>
+                <div class="mode-btn-group">
+                    <button id="btn-select" class="mode-btn" data-mode="3" title="Select Mode (S)">
+                        Select
+                    </button>
+                    <button id="btn-select-dropdown" class="mode-btn-dropdown" title="Selection Type">▾</button>
+                    <div id="select-menu" class="dropdown-menu select-dropdown hidden">
+                        <div class="dropdown-item active" data-select-type="rect">Rectangle Select</div>
+                        <div class="dropdown-item" data-select-type="lasso">Lasso Select</div>
+                    </div>
+                </div>
+                <div class="mode-btn-group">
+                    <button id="btn-eraser" class="mode-btn" data-mode="4" title="Eraser Mode (E)">
+                        Eraser
+                    </button>
+                    <button id="btn-eraser-dropdown" class="mode-btn-dropdown" title="Eraser Size">▾</button>
+                    <div id="eraser-menu" class="dropdown-menu eraser-dropdown hidden">
+                        <div class="dropdown-item" data-eraser-size="8">Small (8px)</div>
+                        <div class="dropdown-item active" data-eraser-size="15">Medium (15px)</div>
+                        <div class="dropdown-item" data-eraser-size="30">Large (30px)</div>
+                        <div class="dropdown-item" data-eraser-size="50">X-Large (50px)</div>
+                    </div>
+                </div>
                 <button id="btn-pan" class="mode-btn" data-mode="5" title="Pan Mode (H)">
                     Pan
                 </button>

@@ -16,13 +16,23 @@ kiQuant is a cell marker quantification tool for immunohistochemistry analysis. 
 
 ```
 kiquant/
-├── src/                    # Source code
+├── kinet/                  # Shared detection package (used by both apps)
+│   ├── __init__.py        # Package exports, model availability checks
+│   ├── model.py           # Ki67Net architecture (ContBatchNorm2d, etc.)
+│   ├── detector.py        # BaseDetector, DetectedNucleus, DetectorFactory
+│   ├── kinet_detector.py  # KiNetDetector (tiled inference, peak extraction)
+│   ├── cellpose_detector.py
+│   ├── stardist_detector.py
+│   └── color_deconv.py    # H-DAB color deconvolution
+├── src/                    # kiQuant app
 │   ├── main.py            # Entry point, Eel backend, exposed functions
 │   ├── marker_state.py    # Data classes (Marker, Field, State)
 │   └── web/               # Frontend files
 │       ├── index.html     # UI layout
 │       ├── style.css      # Styling (dark theme)
 │       └── app.js         # Canvas rendering, event handling
+├── kinet-trainer/          # Training data annotation app (separate)
+│   └── src/               # See KiNet Trainer section below
 ├── scripts/               # Development scripts
 │   ├── dev-setup.bat      # Create venv, install deps
 │   ├── run.bat            # Run the application
@@ -77,7 +87,7 @@ scripts\build.bat
 
 ## AI Detection (experimental)
 
-The `src/detection/` module provides optional AI-powered nucleus detection:
+The `kinet/` package provides optional AI-powered nucleus detection, shared between kiQuant and kinet-trainer:
 
 ### Available Models
 - **KiNet**: Purpose-built for Ki-67 IHC images. Provides joint detection AND classification (positive/negative) in a single pass. Based on Xing et al. "Pixel-to-pixel Learning with Weak Supervision for Single-stage Nucleus Recognition in Ki67 Images" (IEEE TBME, 2019). Original code: https://github.com/exhh/KiNet
@@ -90,7 +100,7 @@ KiNet weights (~45MB) are currently hosted on Dropbox (from original repo).
 **TODO for release**: Move weights to GitHub Releases for long-term reliability:
 1. Create release (e.g., `v0.2.0` or `kinet-weights`)
 2. Upload `ki67net-best.pth` as release asset
-3. Update `MODEL_URL` in `src/detection/kinet_detector.py`
+3. Update `MODEL_URL` in `kinet/kinet_detector.py`
 
 ### Retraining KiNet
 To improve the model with additional training data:
@@ -151,7 +161,7 @@ kinet-trainer/
 - Exports proximity maps for KiNet training format
 - CLI training pipeline with weighted MSE loss
 - Import from kiQuant projects (maps 2 classes, no "other")
-- Shares `Ki67Net` model architecture from `src/detection/kinet_model.py`
+- Shares `Ki67Net` model and detection code from `kinet/` package
 
 **Running:**
 ```batch

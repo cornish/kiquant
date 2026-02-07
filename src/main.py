@@ -13,8 +13,13 @@ from tkinter import Tk, filedialog, messagebox
 from PIL import Image
 import numpy as np
 
+# Add repo root to path for kinet package
+_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
 from marker_state import State, Field, Marker, MarkerClass, Mode, ROI
-from detection import (
+from kinet import (
     is_detection_available,
     is_cellpose_available,
     is_stardist_available,
@@ -892,11 +897,13 @@ def detect_nuclei(model_name, classify_mode='auto', dab_threshold=0.3, settings=
             # KiNet uses original RGB image
             detection_image = image_array
             dab_channel = None
+            # kiQuant only uses 2 classes (positive/negative), exclude "other"
+            settings['include_other'] = False
         else:
             progress_callback("Extracting hematoxylin channel...", 0.05)
 
             # Use hematoxylin channel for detection (better for IHC)
-            from detection.color_deconv import separate_stains
+            from kinet.color_deconv import separate_stains
             hematoxylin, dab_channel = separate_stains(image_array)
 
             # Convert hematoxylin to uint8 image for detection
@@ -913,7 +920,7 @@ def detect_nuclei(model_name, classify_mode='auto', dab_threshold=0.3, settings=
         progress_callback("Initializing detector...", 0.1)
 
         # Get detector and run detection
-        from detection.detector import DetectorFactory
+        from kinet.detector import DetectorFactory
         detector = DetectorFactory.get_detector(model_name)
 
         nuclei = detector.detect(detection_image, progress_callback, settings)
@@ -968,7 +975,7 @@ def detect_nuclei(model_name, classify_mode='auto', dab_threshold=0.3, settings=
                     ))
             else:
                 # CellPose/StarDist: use DAB threshold
-                from detection.color_deconv import classify_by_dab_intensity
+                from kinet.color_deconv import classify_by_dab_intensity
 
                 centroids = [(n.x, n.y) for n in nuclei]
                 classifications = classify_by_dab_intensity(

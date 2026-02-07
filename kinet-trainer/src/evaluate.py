@@ -15,19 +15,16 @@ import sys
 import numpy as np
 from PIL import Image
 
-# Add parent src/detection to path for Ki67Net import
-_kiquant_detection = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    'src', 'detection'
-)
-if _kiquant_detection not in sys.path:
-    sys.path.insert(0, _kiquant_detection)
+# Add repo root to path for kinet package
+_repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 
 
 def load_model(weights_path, device=None):
     """Load Ki67Net model with weights."""
     import torch
-    from kinet_model import Ki67Net
+    from kinet import Ki67Net
 
     if device is None:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

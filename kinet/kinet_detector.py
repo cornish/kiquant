@@ -98,7 +98,7 @@ class KiNetDetector(BaseDetector):
             progress_callback("Loading KiNet model...", 0.0)
 
         import torch
-        from .kinet_model import Ki67Net
+        from .model import Ki67Net
 
         # Check for GPU
         self._device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -136,13 +136,13 @@ class KiNetDetector(BaseDetector):
         """
         Detect nuclei using KiNet.
 
-        KiNet simultaneously detects AND classifies nuclei as positive or negative,
-        so the returned DetectedNucleus objects include classification.
+        KiNet simultaneously detects AND classifies nuclei as positive, negative,
+        or other (non-tumor), so the returned DetectedNucleus objects include classification.
 
         Args:
             image: RGB image as numpy array (H, W, 3) with dtype uint8.
             progress_callback: Optional callback for progress updates.
-            settings: Optional dict with 'min_distance', 'threshold', 'tile_size'.
+            settings: Optional dict with 'min_distance', 'threshold', 'tile_size', 'include_other'.
 
         Returns:
             List of DetectedNucleus objects with classification.
@@ -165,6 +165,8 @@ class KiNetDetector(BaseDetector):
         tile_size = settings.get('tile_size', 1024)
         # Overlap between tiles to avoid boundary artifacts
         tile_overlap = settings.get('tile_overlap', 128)
+        # Whether to include non-tumor (class 2) detections (default True for trainer, False for kiQuant)
+        include_other = settings.get('include_other', True)
 
         # Prepare image for model
         # KiNet expects RGB float32 normalized to [0, 1]
@@ -199,7 +201,8 @@ class KiNetDetector(BaseDetector):
         nuclei = self._extract_nuclei(
             voting_maps,
             min_distance=min_distance,
-            threshold=threshold
+            threshold=threshold,
+            include_other=include_other
         )
 
         # Final CUDA cache cleanup
@@ -365,7 +368,8 @@ class KiNetDetector(BaseDetector):
         self,
         voting_maps: np.ndarray,
         min_distance: int = 5,
-        threshold: float = 0.3
+        threshold: float = 0.3,
+        include_other: bool = True
     ) -> List[DetectedNucleus]:
         """
         Extract nuclei coordinates and classifications from voting maps.
@@ -374,6 +378,7 @@ class KiNetDetector(BaseDetector):
             voting_maps: Shape (3, H, W) with channels for positive, negative, non-tumor.
             min_distance: Minimum distance between detected peaks.
             threshold: Detection threshold (0-1).
+            include_other: Whether to include non-tumor (class 2) detections.
 
         Returns:
             List of DetectedNucleus with x, y, confidence, and marker_class.
@@ -384,10 +389,13 @@ class KiNetDetector(BaseDetector):
 
         # Channel 0: positive tumor nuclei
         # Channel 1: negative tumor nuclei
-        # Channel 2: non-tumor (we ignore these)
+        # Channel 2: non-tumor / other
 
-        # Create combined detection map (max of positive and negative channels)
-        detect_map = np.maximum(voting_maps[0], voting_maps[1])
+        # Create combined detection map (max of all channels)
+        if include_other:
+            detect_map = np.maximum(np.maximum(voting_maps[0], voting_maps[1]), voting_maps[2])
+        else:
+            detect_map = np.maximum(voting_maps[0], voting_maps[1])
 
         # Normalize to 0-1 range
         detect_min = detect_map.min()
@@ -404,18 +412,23 @@ class KiNetDetector(BaseDetector):
             threshold_abs=threshold
         )
 
-        # For each detected point, determine class based on which channel is stronger
+        # For each detected point, determine class based on which channel is strongest
         for coord in coordinates:
             y, x = coord
             pos_score = voting_maps[0, y, x]
             neg_score = voting_maps[1, y, x]
+            other_score = voting_maps[2, y, x]
 
             # Confidence is the detection strength
             confidence = float(detect_map_norm[y, x])
 
-            # Class is determined by which channel is stronger
-            # 0 = positive (green), 1 = negative (red)
-            marker_class = 0 if pos_score >= neg_score else 1
+            # Class is determined by which channel is strongest
+            # 0 = positive (green), 1 = negative (red), 2 = other (blue)
+            if include_other:
+                scores = [pos_score, neg_score, other_score]
+                marker_class = int(np.argmax(scores))
+            else:
+                marker_class = 0 if pos_score >= neg_score else 1
 
             nuclei.append(DetectedNucleus(
                 x=int(x),

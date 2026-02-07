@@ -32,15 +32,12 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-# Add parent src/detection to path for Ki67Net import
-_kiquant_detection = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    'src', 'detection'
-)
-if _kiquant_detection not in sys.path:
-    sys.path.insert(0, _kiquant_detection)
+# Add repo root to path for kinet package
+_repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 
-from kinet_model import Ki67Net
+from kinet import Ki67Net
 from training.dataset import KiNetDataset
 from training.augment import get_train_transform, get_val_transform
 

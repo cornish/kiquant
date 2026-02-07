@@ -1,7 +1,11 @@
 """
-Detection module for kiQuant.
+KiNet - Shared detection module for kiQuant and kinet-trainer.
 Provides nucleus detection using KiNet, CellPose, and StarDist deep learning models.
 """
+
+# Export commonly used classes
+from .detector import BaseDetector, DetectedNucleus, DetectorFactory
+from .model import Ki67Net
 
 # Check for available detection libraries
 _cellpose_available = False
