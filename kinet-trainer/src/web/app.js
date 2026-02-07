@@ -64,6 +64,7 @@ let isErasing = false;
 let eraserImagePos = null;
 let eraserHistorySaved = false;
 let eraserPending = false;
+let eraserHeldMode = null; // Previous mode when holding X for temporary eraser
 
 // Brush state (like eraser but changes class instead of deleting)
 let brushRadius = 15;
@@ -276,6 +277,7 @@ function bindEvents() {
 
     // Keyboard shortcuts
     document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
 
     // Window resize
     window.addEventListener('resize', handleResize);
@@ -385,11 +387,68 @@ async function handleLoadProject() {
         isProjectLoaded = true;
         clearUnsavedChanges();
         hideWelcome();
+
+        // Check for missing images first (more critical)
+        if (result.missing_images && result.missing_images.length > 0) {
+            const count = result.missing_images.length;
+            const preview = result.missing_images.slice(0, 5).join('\n• ');
+            const more = count > 5 ? `\n• ... and ${count - 5} more` : '';
+
+            if (confirm(`Warning: ${count} image(s) no longer exist:\n\n• ${preview}${more}\n\nRemove them from the project?`)) {
+                await eel.remove_missing_images()();
+            }
+        }
+
         await loadCurrentImage();
         updateImageList();
         updateSummary();
+
+        // Check for new images in the folder
+        if (result.new_images && result.new_images.length > 0) {
+            const count = result.new_images.length;
+            const preview = result.new_images.slice(0, 5).join('\n• ');
+            const more = count > 5 ? `\n• ... and ${count - 5} more` : '';
+
+            if (confirm(`Found ${count} new image(s) in the project folder:\n\n• ${preview}${more}\n\nAdd them to the project?`)) {
+                const addResult = await eel.add_new_images(result.new_image_paths)();
+                if (addResult.success) {
+                    await updateImageList();
+                    updateSummary();
+                }
+            }
+        }
     } else if (result.message !== 'No project file selected') {
         alert(result.message);
+    }
+}
+
+async function handleCheckForNewImages() {
+    if (!isProjectLoaded) {
+        alert('No project loaded');
+        return;
+    }
+
+    const result = await eel.check_for_new_images()();
+    if (!result.success) {
+        alert(result.message);
+        return;
+    }
+
+    if (result.count === 0) {
+        alert('No new images found in the project folder.');
+        return;
+    }
+
+    const preview = result.new_images.slice(0, 5).join('\n• ');
+    const more = result.count > 5 ? `\n• ... and ${result.count - 5} more` : '';
+
+    if (confirm(`Found ${result.count} new image(s):\n\n• ${preview}${more}\n\nAdd them to the project?`)) {
+        const addResult = await eel.add_new_images(result.new_image_paths)();
+        if (addResult.success) {
+            await updateImageList();
+            updateSummary();
+            alert(`Added ${addResult.added} new images to the project.`);
+        }
     }
 }
 
@@ -549,6 +608,7 @@ async function handleFileMenuAction(e) {
         case 'new': handleNewProject(); break;
         case 'load': handleLoadProject(); break;
         case 'import': handleImportProject(); break;
+        case 'check-new-images': handleCheckForNewImages(); break;
         case 'save': handleSaveProject(); break;
         case 'tile': showTileModal(); break;
         case 'detect-current': showDetectModal('current'); break;
@@ -1592,6 +1652,27 @@ async function handleKeyDown(e) {
         case 'arrowright':
             e.preventDefault();
             handleNextImage();
+            break;
+        case 'x':
+            // Hold X for temporary eraser
+            if (!eraserHeldMode && currentMode !== Mode.ERASER) {
+                eraserHeldMode = currentMode;
+                setMode(Mode.ERASER);
+            }
+            break;
+    }
+}
+
+function handleKeyUp(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    switch (e.key.toLowerCase()) {
+        case 'x':
+            // Release X to restore previous mode
+            if (eraserHeldMode !== null) {
+                setMode(eraserHeldMode);
+                eraserHeldMode = null;
+            }
             break;
     }
 }

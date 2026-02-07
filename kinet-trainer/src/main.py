@@ -199,10 +199,18 @@ def load_project():
                 'message': f'Image directory not found: {state.image_dir}'
             }
 
+        # Check for missing and new images in the folder
+        missing_images = state.find_missing_images()
+        new_images = state.find_new_images()
+
         return {
             'success': True,
             'message': f'Project loaded with {state.get_total()} images',
-            'image_count': state.get_total()
+            'image_count': state.get_total(),
+            'missing_images': [os.path.basename(f) for f in missing_images],
+            'missing_image_paths': missing_images,
+            'new_images': [os.path.basename(f) for f in new_images],
+            'new_image_paths': new_images
         }
     except Exception as e:
         return {'success': False, 'message': f'Failed to load project: {str(e)}'}
@@ -252,6 +260,60 @@ def import_kiquant_project():
         }
     except Exception as e:
         return {'success': False, 'message': f'Import failed: {str(e)}'}
+
+
+@eel.expose
+def check_for_new_images():
+    """Check if there are new images in the project folder."""
+    if not state.image_dir:
+        return {'success': False, 'message': 'No project loaded'}
+
+    new_images = state.find_new_images()
+
+    return {
+        'success': True,
+        'new_images': [os.path.basename(f) for f in new_images],
+        'new_image_paths': new_images,
+        'count': len(new_images)
+    }
+
+
+@eel.expose
+def add_new_images(filepaths):
+    """Add new images to the project."""
+    if not state.project_path:
+        return {'success': False, 'message': 'No project loaded'}
+
+    added = state.add_images(filepaths)
+
+    if added > 0:
+        state.save_to_file()
+
+    return {
+        'success': True,
+        'added': added,
+        'total': state.get_total(),
+        'message': f'Added {added} new images'
+    }
+
+
+@eel.expose
+def remove_missing_images():
+    """Remove images from project that no longer exist on disk."""
+    if not state.project_path:
+        return {'success': False, 'message': 'No project loaded'}
+
+    removed = state.remove_missing_images()
+
+    if removed > 0:
+        state.save_to_file()
+
+    return {
+        'success': True,
+        'removed': removed,
+        'total': state.get_total(),
+        'message': f'Removed {removed} missing images'
+    }
 
 
 @eel.expose

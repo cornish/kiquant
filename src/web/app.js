@@ -77,6 +77,7 @@ let isErasing = false;
 let eraserImagePos = null; // Current position in image coordinates {x, y}
 let eraserHistorySaved = false; // Track if we've saved history for current stroke
 let eraserPending = false; // Prevent overlapping erase calls
+let eraserHeldMode = null; // Previous mode when holding X for temporary eraser
 
 // Canvas and context
 let canvas, ctx;
@@ -287,6 +288,7 @@ function bindEvents() {
 
     // Keyboard shortcuts
     document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
 
     // Window resize
     window.addEventListener('resize', handleResize);
@@ -1739,6 +1741,27 @@ async function handleKeyDown(e) {
                     markers = result.markers;
                     render();
                 }
+            }
+            break;
+        case 'x':
+            // Hold X for temporary eraser
+            if (!eraserHeldMode && currentMode !== Mode.ERASER) {
+                eraserHeldMode = currentMode;
+                setMode(Mode.ERASER);
+            }
+            break;
+    }
+}
+
+function handleKeyUp(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    switch (e.key.toLowerCase()) {
+        case 'x':
+            // Release X to restore previous mode
+            if (eraserHeldMode !== null) {
+                setMode(eraserHeldMode);
+                eraserHeldMode = null;
             }
             break;
     }

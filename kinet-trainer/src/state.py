@@ -153,6 +153,61 @@ class State:
         self.current_index = 0
         return len(self.fields)
 
+    def find_new_images(self) -> List[str]:
+        """Find images in directory that aren't in the project yet."""
+        if not self.image_dir or not os.path.isdir(self.image_dir):
+            return []
+
+        # Get existing filepaths
+        existing = {f.filepath for f in self.fields}
+
+        new_images = []
+        for filename in os.listdir(self.image_dir):
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in self.IMAGE_EXTENSIONS:
+                filepath = os.path.join(self.image_dir, filename)
+                if filepath not in existing:
+                    new_images.append(filepath)
+
+        new_images.sort()
+        return new_images
+
+    def find_missing_images(self) -> List[str]:
+        """Find images in project that no longer exist on disk."""
+        missing = []
+        for field in self.fields:
+            if not os.path.isfile(field.filepath):
+                missing.append(field.filepath)
+        return missing
+
+    def remove_missing_images(self) -> int:
+        """Remove fields for images that no longer exist. Returns count removed."""
+        original_count = len(self.fields)
+        self.fields = [f for f in self.fields if os.path.isfile(f.filepath)]
+        removed = original_count - len(self.fields)
+
+        # Adjust current_index if needed
+        if self.current_index >= len(self.fields):
+            self.current_index = max(0, len(self.fields) - 1)
+
+        return removed
+
+    def add_images(self, filepaths: List[str]) -> int:
+        """Add new images to the project. Returns count added."""
+        added = 0
+        existing = {f.filepath for f in self.fields}
+
+        for filepath in filepaths:
+            if filepath not in existing and os.path.isfile(filepath):
+                self.fields.append(Field(filepath=filepath))
+                added += 1
+
+        # Re-sort fields by filepath to maintain order
+        self.fields.sort(key=lambda f: f.filepath)
+
+        # Update current_index if needed to stay on same image
+        return added
+
     def get_current_field(self) -> Optional[Field]:
         if 0 <= self.current_index < len(self.fields):
             return self.fields[self.current_index]
