@@ -720,12 +720,12 @@ def _load_detection_model(model_id):
     return load_model(weights_path)
 
 
-def _run_detection_on_field(model, device, field_obj, threshold=0.3,
-                            min_distance=5):
-    """Run detection on a single field and return markers."""
+def _run_detection_on_field(field_obj, threshold=0.3, min_distance=5):
+    """Run detection on a single field using kiQuant's KiNetDetector."""
     import numpy as np
     from PIL import Image as PILImage
 
+    # Use kiQuant's detection module directly
     kiquant_detection = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         'src', 'detection'
@@ -733,21 +733,30 @@ def _run_detection_on_field(model, device, field_obj, threshold=0.3,
     if kiquant_detection not in sys.path:
         sys.path.insert(0, kiquant_detection)
 
-    from evaluate import predict_image, extract_detections
+    from kinet_detector import KiNetDetector
 
     img = PILImage.open(field_obj.filepath).convert('RGB')
     img_np = np.array(img)
 
-    voting_maps = predict_image(model, img_np, device)
-    detections = extract_detections(voting_maps, min_distance, threshold)
+    # Use kiQuant's detector with same settings
+    detector = KiNetDetector()
+    settings = {
+        'threshold': threshold,
+        'min_distance': min_distance,
+        'tile_size': 1024  # Match kiQuant default
+    }
+    nuclei = detector.detect(img_np, settings=settings)
 
-    # Convert detections (y, x, cls) to Marker objects
+    # Convert DetectedNucleus to Marker objects
     new_markers = []
-    for det_y, det_x, cls in detections:
+    for nucleus in nuclei:
+        # KiNet returns marker_class: 0=positive, 1=negative
+        # For trainer we also need class 2 (other), but KiNet doesn't detect those
+        mc = nucleus.marker_class if nucleus.marker_class is not None else 1
         new_markers.append(Marker(
-            marker_class=int(cls),
-            x=int(det_x),
-            y=int(det_y),
+            marker_class=int(mc),
+            x=nucleus.x,
+            y=nucleus.y,
             selected=False
         ))
 
@@ -762,13 +771,8 @@ def detect_current_image(model_id, threshold=0.3, min_distance=5):
         return {'success': False, 'message': 'No image loaded'}
 
     try:
-        eel.onDetectProgress("Loading model...", 0.1)()
-        model, device = _load_detection_model(model_id)
-
-        eel.onDetectProgress("Running detection...", 0.3)()
-        new_markers = _run_detection_on_field(
-            model, device, field, threshold, min_distance
-        )
+        eel.onDetectProgress("Running detection...", 0.1)()
+        new_markers = _run_detection_on_field(field, threshold, min_distance)
 
         # Save history and replace markers
         _save_to_history()
@@ -795,9 +799,6 @@ def detect_all_images(model_id, threshold=0.3, min_distance=5):
         return {'success': False, 'message': 'No images loaded'}
 
     try:
-        eel.onDetectProgress("Loading model...", 0.05)()
-        model, device = _load_detection_model(model_id)
-
         total = len(state.fields)
         total_detected = 0
 
@@ -807,9 +808,7 @@ def detect_all_images(model_id, threshold=0.3, min_distance=5):
                 0.1 + 0.85 * (i / total)
             )()
 
-            new_markers = _run_detection_on_field(
-                model, device, field_obj, threshold, min_distance
-            )
+            new_markers = _run_detection_on_field(field_obj, threshold, min_distance)
 
             # Save history for current field only (others are batch operation)
             if i == state.current_index:
