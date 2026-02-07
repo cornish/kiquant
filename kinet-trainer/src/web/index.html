@@ -27,6 +27,7 @@
                     <div class="dropdown-item" data-action="detect-all">Detect All Images</div>
                     <div class="dropdown-separator"></div>
                     <div class="dropdown-item" data-action="export">Export Training Data</div>
+                    <div class="dropdown-item" data-action="train">Train Model</div>
                     <div class="dropdown-separator"></div>
                     <div class="dropdown-item" data-action="evaluate">Evaluate Model</div>
                     <div class="dropdown-item" data-action="model-browser">Model Browser</div>
@@ -283,6 +284,71 @@
                 <div id="model-list" class="model-list"></div>
                 <div class="modal-buttons">
                     <button id="model-browser-close" class="modal-close">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Training Modal -->
+        <div id="train-modal" class="modal hidden">
+            <div class="modal-content settings-modal">
+                <h2>Train Model</h2>
+                <p class="modal-description">Fine-tune KiNet on your annotated data.</p>
+                <div class="settings-section">
+                    <div class="setting-row">
+                        <label for="train-data-dir">Training Data</label>
+                        <div class="setting-row-inline">
+                            <input type="text" id="train-data-dir" class="setting-input" readonly placeholder="Select exported training data...">
+                            <button id="train-browse" class="setting-btn">Browse</button>
+                        </div>
+                        <span id="train-data-info" class="setting-hint"></span>
+                    </div>
+                    <div class="setting-row">
+                        <label for="train-base-model">Starting Weights</label>
+                        <select id="train-base-model" class="setting-select">
+                            <option value="base">KiNet Base (Xing et al.)</option>
+                        </select>
+                        <span class="setting-hint">Model to fine-tune from</span>
+                    </div>
+                    <div class="setting-row">
+                        <label for="train-epochs">Epochs</label>
+                        <input type="number" id="train-epochs" min="1" max="500" value="50">
+                        <span class="setting-hint">Training iterations (default: 50)</span>
+                    </div>
+                    <div class="setting-row">
+                        <label for="train-batch-size">Batch Size</label>
+                        <select id="train-batch-size" class="setting-select">
+                            <option value="1">1 (low memory)</option>
+                            <option value="2">2</option>
+                            <option value="4" selected>4 (default)</option>
+                            <option value="8">8</option>
+                            <option value="16">16 (high memory)</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <label for="train-lr">Learning Rate</label>
+                        <select id="train-lr" class="setting-select">
+                            <option value="0.0001" selected>1e-4 (default)</option>
+                            <option value="0.00005">5e-5 (slower)</option>
+                            <option value="0.00001">1e-5 (very slow)</option>
+                            <option value="0.0005">5e-4 (faster)</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <label>
+                            <input type="checkbox" id="train-freeze-encoder">
+                            Freeze encoder layers
+                        </label>
+                        <span class="setting-hint">Faster training, less overfitting on small datasets</span>
+                    </div>
+                    <div class="setting-row">
+                        <label for="train-name">Model Name</label>
+                        <input type="text" id="train-name" class="setting-input" placeholder="(auto-generated)">
+                        <span class="setting-hint">Optional name for the trained model</span>
+                    </div>
+                </div>
+                <div class="modal-buttons">
+                    <button id="train-cancel" class="modal-btn-secondary">Cancel</button>
+                    <button id="train-confirm" class="modal-close" disabled>Start Training</button>
                 </div>
             </div>
         </div>

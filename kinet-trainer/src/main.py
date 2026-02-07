@@ -1051,6 +1051,75 @@ def get_review_summary():
     return state.get_review_summary()
 
 
+# ============== Training ==============
+
+@eel.expose
+def start_training(data_dir, epochs=50, batch_size=4, lr=1e-4,
+                   freeze_encoder=False, model_name=None, weights='base'):
+    """Start fine-tuning from exported training data."""
+    if not os.path.isdir(data_dir):
+        return {'success': False, 'message': f'Data directory not found: {data_dir}'}
+
+    # Verify required subdirectories exist
+    required = ['images/train', 'images/val']
+    for subdir in required:
+        path = os.path.join(data_dir, subdir)
+        if not os.path.isdir(path):
+            return {
+                'success': False,
+                'message': f'Invalid training data: missing {subdir}'
+            }
+
+    try:
+        from training.train import train
+
+        def progress_callback(message, progress, metrics):
+            eel.onTrainingProgress(message, progress, metrics)()
+
+        result = train(
+            data_dir=data_dir,
+            weights=weights,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            freeze_encoder=freeze_encoder,
+            model_name=model_name,
+            progress_callback=progress_callback
+        )
+        return result
+    except ImportError as e:
+        return {'success': False, 'message': f'Missing dependency: {str(e)}'}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'message': f'Training failed: {str(e)}'}
+
+
+@eel.expose
+def get_training_data_info(data_dir):
+    """Get info about exported training data directory."""
+    if not os.path.isdir(data_dir):
+        return {'valid': False, 'message': 'Directory not found'}
+
+    train_dir = os.path.join(data_dir, 'images', 'train')
+    val_dir = os.path.join(data_dir, 'images', 'val')
+
+    if not os.path.isdir(train_dir) or not os.path.isdir(val_dir):
+        return {'valid': False, 'message': 'Not a valid training data directory'}
+
+    train_images = len([f for f in os.listdir(train_dir)
+                       if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+    val_images = len([f for f in os.listdir(val_dir)
+                     if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+
+    return {
+        'valid': True,
+        'train_images': train_images,
+        'val_images': val_images,
+        'total_images': train_images + val_images
+    }
+
+
 # ============== Model Evaluation ==============
 
 @eel.expose

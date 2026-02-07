@@ -1,98 +1,150 @@
 """
-KiNet training script.
+KiNet fine-tuning script.
+
+Fine-tunes the base KiNet model on custom annotated data.
 
 Usage:
-    Fine-tune from base model (auto-downloads if needed):
-    python -m training.train --data-dir data/ --output-dir runs/exp01 --epochs 50
+    python -m training.train --data-dir ./exported_data --epochs 50
 
-    Fine-tune from a registered model or weights file:
-    python -m training.train --data-dir data/ --weights base --epochs 50
-    python -m training.train --data-dir data/ --weights ft-20260206-143022 --epochs 50
-    python -m training.train --data-dir data/ --weights path/to/model.pth --epochs 50
-
-    Train from scratch (not recommended without large dataset):
-    python -m training.train --data-dir data/ --output-dir runs/exp01 \
-        --no-pretrained --epochs 200
-
-    Resume interrupted training:
-    python -m training.train --data-dir data/ --output-dir runs/exp01 \
-        --resume runs/exp01/latest_checkpoint.pth
+The script expects data in the format created by Export Training Data:
+    data_dir/
+        images/train/     - Training images
+        images/val/       - Validation images
+        labels_postm/     - Positive tumor proximity maps
+        labels_negtm/     - Negative tumor proximity maps
+        labels_other/     - Non-tumor proximity maps
 """
 
 import argparse
-import csv
-import json
 import os
-import shutil
 import sys
 import time
+from datetime import datetime
 
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.optim as optim
 from torch.utils.data import DataLoader
 
-# Add repo root to path for kinet package
-_repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-if _repo_root not in sys.path:
-    sys.path.insert(0, _repo_root)
+# Add parent directory to path for imports
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_src_dir = os.path.dirname(_script_dir)
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
 
-from kinet import Ki67Net
+# Add kinet module to path
+_repo_root = os.path.dirname(os.path.dirname(_src_dir))
+_kinet_dir = os.path.join(_repo_root, 'kinet')
+if _kinet_dir not in sys.path:
+    sys.path.insert(0, _kinet_dir)
+
 from training.dataset import KiNetDataset
 from training.augment import get_train_transform, get_val_transform
-
 import model_registry
 
 
-class WeightedMSELoss(nn.Module):
-    """MSE loss with foreground weighting to counteract class imbalance."""
-
-    def __init__(self, fg_weight=5.0, threshold=0.05):
-        super().__init__()
-        self.fg_weight = fg_weight
-        self.threshold = threshold
-
-    def forward(self, pred, target):
-        # Weight foreground pixels more heavily
-        # target: (B, 3, H, W), values in [0, 1]
-        fg_mask = (target > self.threshold).float()
-        weights = 1.0 + (self.fg_weight - 1.0) * fg_mask
-
-        loss = weights * (pred - target) ** 2
-        return loss.mean()
+def get_model():
+    """Import and return the Ki67Net model class."""
+    from model import Ki67Net
+    return Ki67Net()
 
 
-def train_one_epoch(model, loader, optimizer, criterion, device):
-    """Train for one epoch. Returns average loss."""
+def load_weights(model, weights_path, device, freeze_encoder=False):
+    """
+    Load weights into model.
+
+    Args:
+        model: Ki67Net model instance
+        weights_path: Path to .pth weights file
+        device: torch device
+        freeze_encoder: If True, freeze encoder layers for fine-tuning
+
+    Returns:
+        Number of parameters loaded
+    """
+    state_dict = torch.load(weights_path, map_location=device, weights_only=False)
+
+    # Safe loading - skip mismatched keys
+    own_state = model.state_dict()
+    loaded = 0
+
+    for name, param in state_dict.items():
+        if name not in own_state:
+            continue
+        if hasattr(param, 'data'):
+            param = param.data
+        if own_state[name].size() != param.size():
+            continue
+        own_state[name].copy_(param)
+        loaded += 1
+
+    # Optionally freeze encoder layers
+    if freeze_encoder:
+        encoder_prefixes = ['in_tr', 'down_tr']
+        for name, param in model.named_parameters():
+            if any(name.startswith(prefix) for prefix in encoder_prefixes):
+                param.requires_grad = False
+
+    return loaded
+
+
+def count_parameters(model, only_trainable=True):
+    """Count model parameters."""
+    if only_trainable:
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return sum(p.numel() for p in model.parameters())
+
+
+class AverageMeter:
+    """Track running average of a metric."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+
+def train_epoch(model, loader, criterion, optimizer, device, epoch, total_epochs):
+    """Train for one epoch."""
     model.train()
-    total_loss = 0.0
-    count = 0
+    loss_meter = AverageMeter()
 
-    for images, labels in loader:
+    for batch_idx, (images, labels) in enumerate(loader):
         images = images.to(device)
         labels = labels.to(device)
 
         optimizer.zero_grad()
         outputs = model(images)
-
-        # Clamp output to [0, 1] for proximity maps
-        outputs = torch.clamp(outputs, 0, 1)
-
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
 
-        total_loss += loss.item() * images.size(0)
-        count += images.size(0)
+        loss_meter.update(loss.item(), images.size(0))
 
-    return total_loss / count if count > 0 else 0.0
+        # Print progress
+        if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == len(loader):
+            print(f"  Epoch {epoch}/{total_epochs} | "
+                  f"Batch {batch_idx+1}/{len(loader)} | "
+                  f"Loss: {loss_meter.avg:.4f}")
+
+    return loss_meter.avg
 
 
 def validate(model, loader, criterion, device):
-    """Validate model. Returns average loss."""
+    """Validate the model."""
     model.eval()
-    total_loss = 0.0
-    count = 0
+    loss_meter = AverageMeter()
 
     with torch.no_grad():
         for images, labels in loader:
@@ -100,238 +152,335 @@ def validate(model, loader, criterion, device):
             labels = labels.to(device)
 
             outputs = model(images)
-            outputs = torch.clamp(outputs, 0, 1)
-
             loss = criterion(outputs, labels)
-            total_loss += loss.item() * images.size(0)
-            count += images.size(0)
 
-    return total_loss / count if count > 0 else 0.0
+            loss_meter.update(loss.item(), images.size(0))
+
+    return loss_meter.avg
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Train KiNet model')
-    parser.add_argument('--data-dir', required=True, help='Training data directory')
-    parser.add_argument('--output-dir', default='runs/exp', help='Output directory')
-    parser.add_argument('--weights', default=None,
-                        help='Pre-trained weights: model ID (e.g. "base", "ft-20260206-143022") or file path')
-    parser.add_argument('--resume', default=None, help='Checkpoint to resume training from')
-    parser.add_argument('--no-pretrained', action='store_true',
-                        help='Train from scratch (skip auto-loading pretrained weights)')
-    parser.add_argument('--model-name', default=None,
-                        help='Human-friendly name for the trained model (default: auto-generated)')
-    parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
-    parser.add_argument('--batch-size', type=int, default=4, help='Batch size')
-    parser.add_argument('--crop-size', type=int, default=256, help='Training crop size')
-    parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
-    parser.add_argument('--fg-weight', type=float, default=5.0, help='Foreground loss weight')
-    parser.add_argument('--num-workers', type=int, default=2, help='DataLoader workers')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    args = parser.parse_args()
+def train(
+    data_dir: str,
+    weights: str = 'base',
+    epochs: int = 50,
+    batch_size: int = 4,
+    lr: float = 1e-4,
+    crop_size: int = 256,
+    freeze_encoder: bool = False,
+    output_dir: str = None,
+    model_name: str = None,
+    progress_callback=None
+):
+    """
+    Fine-tune KiNet on custom data.
 
-    # Set seed
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
+    Args:
+        data_dir: Path to exported training data
+        weights: Starting weights ('base', model ID, or path)
+        epochs: Number of training epochs
+        batch_size: Batch size
+        lr: Learning rate
+        crop_size: Random crop size for training
+        freeze_encoder: Freeze encoder layers (transfer learning)
+        output_dir: Where to save model (default: ~/.kiquant/models/)
+        model_name: Name for the model in registry
+        progress_callback: Optional callback(message, progress, metrics)
 
-    # Device
+    Returns:
+        Dict with training results and model info
+    """
+    # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
+    if device.type == 'cuda':
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
 
-    # Create output directory
-    os.makedirs(args.output_dir, exist_ok=True)
-
-    # Save config
-    config = vars(args)
-    config['device'] = str(device)
-    with open(os.path.join(args.output_dir, 'config.json'), 'w') as f:
-        json.dump(config, f, indent=2)
-
-    # Datasets
-    print("Loading datasets...")
-    train_transform = get_train_transform(args.crop_size)
-    val_transform = get_val_transform(args.crop_size)
-
-    train_dataset = KiNetDataset(args.data_dir, 'train', transform=train_transform)
-    val_dataset = KiNetDataset(args.data_dir, 'val', transform=val_transform)
-
-    print(f"  Train: {len(train_dataset)} images")
-    print(f"  Val:   {len(val_dataset)} images")
-
-    train_loader = DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True,
-        num_workers=args.num_workers, pin_memory=True, drop_last=True
-    )
-    val_loader = DataLoader(
-        val_dataset, batch_size=args.batch_size, shuffle=False,
-        num_workers=args.num_workers, pin_memory=True
-    )
-
-    # Model
-    print("Creating model...")
-    model = Ki67Net()
-
-    # Load pre-trained weights
-    start_epoch = 0
-    best_val_loss = float('inf')
-    parent_model_id = None  # Track lineage
-
-    if args.resume:
-        print(f"Resuming from checkpoint: {args.resume}")
-        checkpoint = torch.load(args.resume, map_location=device, weights_only=False)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        start_epoch = checkpoint.get('epoch', 0) + 1
-        best_val_loss = checkpoint.get('best_val_loss', float('inf'))
-        parent_model_id = checkpoint.get('parent_model_id')
-    elif args.weights:
-        # Resolve via registry (accepts model IDs or file paths)
-        weights_path, resolved_id = model_registry.resolve_weights_path(args.weights)
-        if weights_path is None:
-            print(f"Error: Could not resolve weights '{args.weights}'")
-            print("  Provide a registered model ID or a valid file path.")
-            sys.exit(1)
-        parent_model_id = resolved_id or model_registry.find_model_id_by_path(weights_path)
-        print(f"Loading pre-trained weights: {weights_path}")
-        if resolved_id:
-            print(f"  (registry model: {resolved_id})")
-        state_dict = torch.load(weights_path, map_location=device, weights_only=False)
-        if 'model_state_dict' in state_dict:
-            state_dict = state_dict['model_state_dict']
-        model.load_state_dict(state_dict, strict=False)
-    elif not args.no_pretrained:
-        # Auto-download base model via registry
-        print("Looking for base model weights...")
-        try:
-            cached = model_registry.ensure_base_model(
+    # Resolve starting weights
+    weights_path, parent_model_id = model_registry.resolve_weights_path(weights)
+    if weights_path is None:
+        # Try to ensure base model is downloaded
+        if weights == 'base':
+            weights_path = model_registry.ensure_base_model(
                 progress_callback=lambda msg, p: print(f"  {msg}")
             )
             parent_model_id = 'base'
-            print(f"Using base model: {cached}")
-            print("  (use --no-pretrained to train from scratch)")
-            state_dict = torch.load(cached, map_location=device, weights_only=False)
-            if 'model_state_dict' in state_dict:
-                state_dict = state_dict['model_state_dict']
-            model.load_state_dict(state_dict, strict=False)
-        except Exception as e:
-            print(f"Could not obtain base model: {e}")
-            print("Training from scratch.")
-            print("  Or pass --weights <path> to specify weights manually.")
+        else:
+            raise ValueError(f"Could not resolve weights: {weights}")
 
+    print(f"Starting from: {parent_model_id or weights_path}")
+
+    # Load model
+    if progress_callback:
+        progress_callback("Loading model...", 0.05, None)
+
+    model = get_model()
+    loaded = load_weights(model, weights_path, device, freeze_encoder)
     model = model.to(device)
 
-    # Optimizer and loss
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    criterion = WeightedMSELoss(fg_weight=args.fg_weight)
+    total_params = count_parameters(model, only_trainable=False)
+    trainable_params = count_parameters(model, only_trainable=True)
+    print(f"Loaded {loaded} parameter tensors")
+    print(f"Total parameters: {total_params:,}")
+    print(f"Trainable parameters: {trainable_params:,}")
 
-    if args.resume and 'optimizer_state_dict' in checkpoint:
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    if freeze_encoder:
+        print("Encoder layers frozen for transfer learning")
 
-    # Training log
-    log_path = os.path.join(args.output_dir, 'training_log.csv')
-    log_exists = os.path.exists(log_path) and args.resume
-    log_file = open(log_path, 'a' if log_exists else 'w', newline='')
-    log_writer = csv.writer(log_file)
-    if not log_exists:
-        log_writer.writerow(['epoch', 'train_loss', 'val_loss', 'lr', 'time_sec'])
+    # Setup data loaders
+    if progress_callback:
+        progress_callback("Loading datasets...", 0.1, None)
+
+    train_transform = get_train_transform(crop_size)
+    val_transform = get_val_transform(crop_size)
+
+    train_dataset = KiNetDataset(data_dir, split='train', transform=train_transform)
+    val_dataset = KiNetDataset(data_dir, split='val', transform=val_transform)
+
+    print(f"Training images: {len(train_dataset)}")
+    print(f"Validation images: {len(val_dataset)}")
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=0,  # Windows compatibility
+        pin_memory=device.type == 'cuda'
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=device.type == 'cuda'
+    )
+
+    # Loss and optimizer
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=lr
+    )
+
+    # Learning rate scheduler - reduce on plateau
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=5, verbose=True
+    )
 
     # Training loop
-    print(f"\nStarting training from epoch {start_epoch}...")
-    print(f"  Epochs: {args.epochs}")
-    print(f"  Batch size: {args.batch_size}")
-    print(f"  Learning rate: {args.lr}")
-    print(f"  Crop size: {args.crop_size}")
-    print(f"  Foreground weight: {args.fg_weight}")
-    print()
+    print(f"\nStarting training for {epochs} epochs...")
+    print("-" * 50)
 
-    for epoch in range(start_epoch, args.epochs):
+    best_val_loss = float('inf')
+    best_epoch = 0
+    train_losses = []
+    val_losses = []
+
+    # Setup output directory
+    if output_dir is None:
+        output_dir = model_registry.MODEL_DIR
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Generate model ID
+    model_id = model_registry.generate_model_id()
+    checkpoint_path = os.path.join(output_dir, f"{model_id}.pth")
+
+    start_time = time.time()
+
+    for epoch in range(1, epochs + 1):
         epoch_start = time.time()
 
-        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
+        # Train
+        train_loss = train_epoch(
+            model, train_loader, criterion, optimizer, device,
+            epoch, epochs
+        )
+        train_losses.append(train_loss)
+
+        # Validate
         val_loss = validate(model, val_loader, criterion, device)
+        val_losses.append(val_loss)
+
+        # Update scheduler
+        scheduler.step(val_loss)
 
         epoch_time = time.time() - epoch_start
         current_lr = optimizer.param_groups[0]['lr']
 
-        print(f"Epoch {epoch+1:3d}/{args.epochs}  "
-              f"train_loss={train_loss:.6f}  val_loss={val_loss:.6f}  "
-              f"lr={current_lr:.6f}  time={epoch_time:.1f}s")
-
-        # Log
-        log_writer.writerow([epoch + 1, f'{train_loss:.6f}', f'{val_loss:.6f}',
-                             f'{current_lr:.6f}', f'{epoch_time:.1f}'])
-        log_file.flush()
+        print(f"Epoch {epoch}/{epochs} | "
+              f"Train: {train_loss:.4f} | Val: {val_loss:.4f} | "
+              f"LR: {current_lr:.2e} | Time: {epoch_time:.1f}s")
 
         # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(),
-                       os.path.join(args.output_dir, 'best_model.pth'))
-            print(f"  -> New best val loss: {val_loss:.6f}")
+            best_epoch = epoch
+            torch.save(model.state_dict(), checkpoint_path)
+            print(f"  -> Saved best model (val_loss: {val_loss:.4f})")
 
-        # Save latest checkpoint (for resume)
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'best_val_loss': best_val_loss,
-            'train_loss': train_loss,
-            'val_loss': val_loss,
-            'parent_model_id': parent_model_id,
-        }, os.path.join(args.output_dir, 'latest_checkpoint.pth'))
-
-    log_file.close()
-
-    # Save final model
-    torch.save(model.state_dict(),
-               os.path.join(args.output_dir, 'final_model.pth'))
-
-    print(f"\nTraining complete!")
-    print(f"  Best val loss: {best_val_loss:.6f}")
-    print(f"  Models saved to: {args.output_dir}")
-
-    # Register best model in the registry
-    try:
-        new_model_id = model_registry.generate_model_id()
-        best_model_src = os.path.join(args.output_dir, 'best_model.pth')
-
-        if os.path.exists(best_model_src):
-            # Copy to canonical registry location
-            registry_path = os.path.join(
-                model_registry.MODEL_DIR, f'{new_model_id}.pth'
-            )
-            os.makedirs(model_registry.MODEL_DIR, exist_ok=True)
-            shutil.copy2(best_model_src, registry_path)
-
-            # Gather training data summary
-            training_data = {
-                'data_dir': os.path.abspath(args.data_dir),
-                'train_images': len(train_dataset),
-                'val_images': len(val_dataset),
+        # Progress callback
+        if progress_callback:
+            progress = 0.1 + 0.85 * (epoch / epochs)
+            metrics = {
+                'epoch': epoch,
+                'train_loss': train_loss,
+                'val_loss': val_loss,
+                'best_val_loss': best_val_loss,
+                'lr': current_lr
             }
+            progress_callback(f"Epoch {epoch}/{epochs}", progress, metrics)
 
-            model_name = args.model_name or f"Fine-tuned {new_model_id.replace('ft-', '')}"
+    total_time = time.time() - start_time
+    print("-" * 50)
+    print(f"Training complete in {total_time/60:.1f} minutes")
+    print(f"Best validation loss: {best_val_loss:.4f} at epoch {best_epoch}")
 
-            entry = model_registry.register_model(
-                model_id=new_model_id,
-                name=model_name,
-                path=registry_path,
-                parent_model=parent_model_id,
-                training_data=training_data,
-                metrics={
-                    'best_val_loss': float(best_val_loss),
-                    'epochs_trained': args.epochs - start_epoch,
-                },
-                description=f"Trained on {len(train_dataset)} images for {args.epochs - start_epoch} epochs"
-            )
+    # Register model
+    if progress_callback:
+        progress_callback("Registering model...", 0.98, None)
 
-            # Print lineage
-            lineage = model_registry.get_model_lineage(new_model_id)
-            lineage_str = ' -> '.join(m['id'] for m in lineage)
-            print(f"\n  Model registered: {new_model_id}")
-            print(f"  Lineage: {lineage_str}")
-            print(f"  Registry path: {registry_path}")
+    if model_name is None:
+        model_name = f"Fine-tuned {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+    entry = model_registry.register_model(
+        model_id=model_id,
+        name=model_name,
+        path=checkpoint_path,
+        parent_model=parent_model_id,
+        training_data=data_dir,
+        metrics={
+            'best_val_loss': float(best_val_loss),
+            'best_epoch': best_epoch,
+            'final_train_loss': float(train_losses[-1]),
+            'epochs_trained': epochs,
+            'train_images': len(train_dataset),
+            'val_images': len(val_dataset),
+        },
+        description=f"Fine-tuned from {parent_model_id or 'custom weights'}"
+    )
+
+    print(f"\nModel registered: {model_id}")
+    print(f"  Name: {model_name}")
+    print(f"  Path: {checkpoint_path}")
+
+    if progress_callback:
+        progress_callback("Training complete!", 1.0, None)
+
+    return {
+        'success': True,
+        'model_id': model_id,
+        'model_name': model_name,
+        'model_path': checkpoint_path,
+        'best_val_loss': best_val_loss,
+        'best_epoch': best_epoch,
+        'epochs_trained': epochs,
+        'train_losses': train_losses,
+        'val_losses': val_losses,
+        'total_time_seconds': total_time
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Fine-tune KiNet on custom annotated data',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Basic fine-tuning from base model
+  python -m training.train --data-dir ./exported_data --epochs 50
+
+  # Fine-tune with frozen encoder (faster, less overfitting)
+  python -m training.train --data-dir ./exported_data --freeze-encoder
+
+  # Fine-tune from a previous fine-tuned model
+  python -m training.train --data-dir ./exported_data --weights ft-20260207-143022
+
+  # Custom learning rate and batch size
+  python -m training.train --data-dir ./exported_data --lr 5e-5 --batch-size 8
+        """
+    )
+
+    parser.add_argument(
+        '--data-dir', required=True,
+        help='Path to exported training data directory'
+    )
+    parser.add_argument(
+        '--weights', default='base',
+        help='Starting weights: "base", model ID, or path to .pth file'
+    )
+    parser.add_argument(
+        '--epochs', type=int, default=50,
+        help='Number of training epochs (default: 50)'
+    )
+    parser.add_argument(
+        '--batch-size', type=int, default=4,
+        help='Batch size (default: 4)'
+    )
+    parser.add_argument(
+        '--lr', type=float, default=1e-4,
+        help='Learning rate (default: 1e-4)'
+    )
+    parser.add_argument(
+        '--crop-size', type=int, default=256,
+        help='Random crop size for training (default: 256)'
+    )
+    parser.add_argument(
+        '--freeze-encoder', action='store_true',
+        help='Freeze encoder layers (transfer learning mode)'
+    )
+    parser.add_argument(
+        '--output-dir',
+        help='Output directory for model (default: ~/.kiquant/models/)'
+    )
+    parser.add_argument(
+        '--name',
+        help='Name for the fine-tuned model'
+    )
+
+    args = parser.parse_args()
+
+    # Validate data directory
+    if not os.path.isdir(args.data_dir):
+        print(f"Error: Data directory not found: {args.data_dir}")
+        sys.exit(1)
+
+    # Check for required subdirectories
+    required = ['images/train', 'images/val', 'labels_postm/train']
+    for subdir in required:
+        path = os.path.join(args.data_dir, subdir)
+        if not os.path.isdir(path):
+            print(f"Error: Required directory not found: {path}")
+            print("Did you export training data from KiNet Trainer?")
+            sys.exit(1)
+
+    try:
+        result = train(
+            data_dir=args.data_dir,
+            weights=args.weights,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            lr=args.lr,
+            crop_size=args.crop_size,
+            freeze_encoder=args.freeze_encoder,
+            output_dir=args.output_dir,
+            model_name=args.name
+        )
+
+        print("\n" + "=" * 50)
+        print("TRAINING SUMMARY")
+        print("=" * 50)
+        print(f"Model ID: {result['model_id']}")
+        print(f"Best validation loss: {result['best_val_loss']:.4f}")
+        print(f"Training time: {result['total_time_seconds']/60:.1f} minutes")
+        print(f"\nModel saved to: {result['model_path']}")
+        print("\nTo use this model for detection in KiNet Trainer,")
+        print("select it from the model dropdown in the detection dialog.")
+
     except Exception as e:
-        print(f"\n  Warning: Could not register model: {e}")
-        print(f"  Best model is still saved at: {os.path.join(args.output_dir, 'best_model.pth')}")
+        print(f"\nError during training: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == '__main__':

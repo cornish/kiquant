@@ -987,6 +987,49 @@ body {
     min-width: 180px;
 }
 
+/* Text input */
+.setting-input {
+    padding: 6px 8px;
+    border: 1px solid #505050;
+    border-radius: 4px;
+    background-color: #3c3c3c;
+    color: #e0e0e0;
+    font-size: 13px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.setting-input:read-only {
+    background-color: #2a2a2a;
+    color: #aaa;
+}
+
+/* Inline row for input + button */
+.setting-row-inline {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.setting-row-inline .setting-input {
+    flex: 1;
+}
+
+.setting-btn {
+    padding: 6px 12px;
+    border: 1px solid #505050;
+    border-radius: 4px;
+    background-color: #4a4a4a;
+    color: #e0e0e0;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.setting-btn:hover {
+    background-color: #5a5a5a;
+}
+
 /* Checkbox styling */
 .setting-row input[type="checkbox"] {
     margin-right: 6px;

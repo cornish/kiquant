@@ -188,7 +188,20 @@ function init() {
         eraserMenu: document.getElementById('eraser-menu'),
         // Brush dropdown
         btnBrushDropdown: document.getElementById('btn-brush-dropdown'),
-        brushMenu: document.getElementById('brush-menu')
+        brushMenu: document.getElementById('brush-menu'),
+        // Training
+        trainModal: document.getElementById('train-modal'),
+        trainDataDir: document.getElementById('train-data-dir'),
+        trainDataInfo: document.getElementById('train-data-info'),
+        trainBrowse: document.getElementById('train-browse'),
+        trainBaseModel: document.getElementById('train-base-model'),
+        trainEpochs: document.getElementById('train-epochs'),
+        trainBatchSize: document.getElementById('train-batch-size'),
+        trainLr: document.getElementById('train-lr'),
+        trainFreezeEncoder: document.getElementById('train-freeze-encoder'),
+        trainName: document.getElementById('train-name'),
+        trainCancel: document.getElementById('train-cancel'),
+        trainConfirm: document.getElementById('train-confirm')
     };
 
     canvas = elements.canvas;
@@ -350,6 +363,14 @@ function bindEvents() {
     elements.modelBrowserClose.addEventListener('click', () => elements.modelBrowserModal.classList.add('hidden'));
     elements.modelBrowserModal.addEventListener('click', (e) => {
         if (e.target === elements.modelBrowserModal) elements.modelBrowserModal.classList.add('hidden');
+    });
+
+    // Training modal
+    elements.trainBrowse.addEventListener('click', handleTrainBrowse);
+    elements.trainCancel.addEventListener('click', () => elements.trainModal.classList.add('hidden'));
+    elements.trainConfirm.addEventListener('click', handleTrainConfirm);
+    elements.trainModal.addEventListener('click', (e) => {
+        if (e.target === elements.trainModal) elements.trainModal.classList.add('hidden');
     });
 }
 
@@ -614,6 +635,7 @@ async function handleFileMenuAction(e) {
         case 'detect-current': showDetectModal('current'); break;
         case 'detect-all': showDetectModal('all'); break;
         case 'export': showExportModal(); break;
+        case 'train': showTrainModal(); break;
         case 'evaluate': handleEvaluate(); break;
         case 'model-browser': showModelBrowser(); break;
         case 'about': showAboutModal(); break;
@@ -669,6 +691,102 @@ async function handleExportConfirm() {
     }
 }
 
+// ============== Training ==============
+
+let trainDataDir = '';
+
+async function showTrainModal() {
+    // Reset form
+    trainDataDir = '';
+    elements.trainDataDir.value = '';
+    elements.trainDataInfo.textContent = '';
+    elements.trainConfirm.disabled = true;
+    elements.trainEpochs.value = 50;
+    elements.trainBatchSize.value = '4';
+    elements.trainLr.value = '0.0001';
+    elements.trainFreezeEncoder.checked = false;
+    elements.trainName.value = '';
+
+    // Populate base model dropdown with registered models
+    try {
+        const result = await eel.get_available_models()();
+        elements.trainBaseModel.innerHTML = '';
+        if (result.success && result.models) {
+            result.models.forEach(model => {
+                const opt = document.createElement('option');
+                opt.value = model.id;
+                opt.textContent = model.name;
+                elements.trainBaseModel.appendChild(opt);
+            });
+        }
+    } catch (e) {
+        elements.trainBaseModel.innerHTML = '<option value="base">KiNet Base</option>';
+    }
+
+    elements.trainModal.classList.remove('hidden');
+}
+
+async function handleTrainBrowse() {
+    const dir = await eel.select_directory('Select Training Data Directory')();
+    if (!dir) return;
+
+    trainDataDir = dir;
+    elements.trainDataDir.value = dir;
+
+    // Validate training data
+    const info = await eel.get_training_data_info(dir)();
+    if (info.valid) {
+        elements.trainDataInfo.textContent = `${info.train_images} train + ${info.val_images} val images`;
+        elements.trainDataInfo.style.color = '#4caf50';
+        elements.trainConfirm.disabled = false;
+    } else {
+        elements.trainDataInfo.textContent = info.message || 'Invalid training data directory';
+        elements.trainDataInfo.style.color = '#f44336';
+        elements.trainConfirm.disabled = true;
+    }
+}
+
+async function handleTrainConfirm() {
+    if (!trainDataDir) {
+        alert('Please select a training data directory');
+        return;
+    }
+
+    elements.trainModal.classList.add('hidden');
+
+    const epochs = parseInt(elements.trainEpochs.value) || 50;
+    const batchSize = parseInt(elements.trainBatchSize.value) || 4;
+    const lr = parseFloat(elements.trainLr.value) || 0.0001;
+    const freezeEncoder = elements.trainFreezeEncoder.checked;
+    const modelName = elements.trainName.value.trim() || null;
+    const weights = elements.trainBaseModel.value || 'base';
+
+    showProgress('Starting training...');
+
+    try {
+        const result = await eel.start_training(
+            trainDataDir, epochs, batchSize, lr, freezeEncoder, modelName, weights
+        )();
+
+        hideProgress();
+
+        if (result.success) {
+            let msg = `Training complete!\n\n`;
+            msg += `Model: ${result.model_name}\n`;
+            msg += `ID: ${result.model_id}\n`;
+            msg += `Best validation loss: ${result.best_val_loss.toFixed(4)} (epoch ${result.best_epoch})\n`;
+            msg += `Training time: ${(result.total_time_seconds / 60).toFixed(1)} minutes\n\n`;
+            msg += `The model is now available in the detection model dropdown.`;
+            alert(msg);
+        } else {
+            alert('Training failed: ' + result.message);
+        }
+    } catch (e) {
+        hideProgress();
+        alert('Training error: ' + e.message);
+    }
+}
+
 // ============== Evaluate ==============
 
 async function handleEvaluate() {
@@ -720,6 +838,13 @@ eel.expose(onEvalProgress);
 function onEvalProgress(message, progress) {
     elements.progressText.textContent = message;
     elements.progressBar.style.width = (progress * 100) + '%';
+}
+
+eel.expose(onTrainingProgress);
+function onTrainingProgress(message, progress, metrics) {
+    elements.progressText.textContent = message;
+    elements.progressBar.style.width = (progress * 100) + '%';
+    // Could display metrics in the future (loss curves, etc.)
 }
 
 // ============== Undo/Redo ==============
