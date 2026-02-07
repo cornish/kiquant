@@ -42,19 +42,14 @@ def load_model(weights_path, device=None):
     return model, device
 
 
-def predict_image(model, image_np, device, tile_size=1024, tile_overlap=128):
+def predict_image(model, image_np, device):
     """
-    Run model on a single image with tiled processing for large images.
-
-    Uses tiling to match kiQuant's behavior - important because ContBatchNorm2d
-    computes different statistics for different input sizes.
+    Run model on a single image.
 
     Args:
         model: Ki67Net model
         image_np: RGB numpy array (H, W, 3) uint8 or float32
         device: torch device
-        tile_size: Tile size for processing (0 = no tiling)
-        tile_overlap: Overlap between tiles for blending
 
     Returns:
         voting_maps: numpy array (3, H, W) float32
@@ -64,94 +59,14 @@ def predict_image(model, image_np, device, tile_size=1024, tile_overlap=128):
     if image_np.dtype == np.uint8:
         image_np = image_np.astype(np.float32) / 255.0
 
-    h, w = image_np.shape[:2]
+    # (H, W, 3) -> (1, 3, H, W)
+    tensor = torch.from_numpy(image_np.transpose(2, 0, 1)).unsqueeze(0).to(device)
 
-    # Use tiling if image is larger than tile_size
-    use_tiling = tile_size > 0 and (h > tile_size or w > tile_size)
+    with torch.no_grad():
+        output = model(tensor)
+        output = torch.clamp(output, 0, 1)
 
-    if not use_tiling:
-        # Process whole image
-        tensor = torch.from_numpy(image_np.transpose(2, 0, 1)).unsqueeze(0).to(device)
-        with torch.no_grad():
-            output = model(tensor)
-            output = torch.clamp(output, 0, 1)
-        return output[0].cpu().numpy()
-
-    # Tiled processing with overlap and blending (matches kiQuant)
-    voting_maps = np.zeros((3, h, w), dtype=np.float32)
-    weight_map = np.zeros((h, w), dtype=np.float32)
-
-    step = tile_size - tile_overlap
-    y_positions = list(range(0, max(1, h - tile_overlap), step))
-    x_positions = list(range(0, max(1, w - tile_overlap), step))
-
-    # Ensure we cover the entire image
-    if y_positions[-1] + tile_size < h:
-        y_positions.append(max(0, h - tile_size))
-    if x_positions[-1] + tile_size < w:
-        x_positions.append(max(0, w - tile_size))
-
-    # Create blending weights (cosine taper at edges)
-    blend_weights = _create_blend_weights(tile_size, tile_overlap)
-
-    for y_start in y_positions:
-        for x_start in x_positions:
-            y_end = min(y_start + tile_size, h)
-            x_end = min(x_start + tile_size, w)
-            actual_h = y_end - y_start
-            actual_w = x_end - x_start
-
-            tile = image_np[y_start:y_end, x_start:x_end]
-
-            # Pad tile if smaller than tile_size
-            if actual_h < tile_size or actual_w < tile_size:
-                padded_tile = np.zeros((tile_size, tile_size, 3), dtype=np.float32)
-                padded_tile[:actual_h, :actual_w] = tile
-                tile = padded_tile
-
-            # Run inference
-            tensor = torch.from_numpy(tile.transpose(2, 0, 1)).unsqueeze(0).to(device)
-            with torch.no_grad():
-                output = model(tensor)
-                output = torch.clamp(output, 0, 1)
-            tile_output = output[0].cpu().numpy()
-
-            # Crop to actual size
-            tile_output = tile_output[:, :actual_h, :actual_w]
-            tile_weights = blend_weights[:actual_h, :actual_w].copy()
-
-            # Adjust weights at image boundaries
-            if y_start == 0:
-                tile_weights[:tile_overlap // 2, :] = 1.0
-            if x_start == 0:
-                tile_weights[:, :tile_overlap // 2] = 1.0
-            if y_end == h:
-                tile_weights[-(tile_overlap // 2):, :] = 1.0
-            if x_end == w:
-                tile_weights[:, -(tile_overlap // 2):] = 1.0
-
-            # Accumulate
-            for c in range(3):
-                voting_maps[c, y_start:y_end, x_start:x_end] += tile_output[c] * tile_weights
-            weight_map[y_start:y_end, x_start:x_end] += tile_weights
-
-    # Normalize by weights
-    weight_map = np.maximum(weight_map, 1e-8)
-    for c in range(3):
-        voting_maps[c] /= weight_map
-
-    return voting_maps
-
-
-def _create_blend_weights(tile_size, overlap):
-    """Create 2D blending weights with cosine taper at edges."""
-    weights_1d = np.ones(tile_size, dtype=np.float32)
-    taper_length = overlap // 2
-    if taper_length > 0:
-        taper = 0.5 * (1 - np.cos(np.linspace(0, np.pi, taper_length)))
-        weights_1d[:taper_length] = taper
-        weights_1d[-taper_length:] = taper[::-1]
-    return np.outer(weights_1d, weights_1d)
+    return output[0].cpu().numpy()  # (3, H, W)
 
 
 def extract_peaks(voting_map, min_distance=5, threshold=0.3):
