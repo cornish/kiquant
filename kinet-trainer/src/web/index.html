@@ -75,6 +75,24 @@
                         <div class="dropdown-item" data-eraser-size="50">X-Large (50px)</div>
                     </div>
                 </div>
+                <div class="mode-btn-group">
+                    <button id="btn-brush" class="mode-btn" data-mode="6" title="Brush Mode (B) - Paint markers to change class">
+                        Brush
+                    </button>
+                    <button id="btn-brush-dropdown" class="mode-btn-dropdown" title="Brush Settings">▾</button>
+                    <div id="brush-menu" class="dropdown-menu brush-dropdown hidden">
+                        <div class="dropdown-section">Paint to:</div>
+                        <div class="dropdown-item active" data-brush-class="0"><span class="marker-icon positive">+</span> Positive</div>
+                        <div class="dropdown-item" data-brush-class="1"><span class="marker-icon negative">-</span> Negative</div>
+                        <div class="dropdown-item" data-brush-class="2"><span class="marker-icon other">o</span> Other</div>
+                        <div class="dropdown-divider"></div>
+                        <div class="dropdown-section">Brush size:</div>
+                        <div class="dropdown-item" data-brush-size="8">Small (8px)</div>
+                        <div class="dropdown-item size-active" data-brush-size="15">Medium (15px)</div>
+                        <div class="dropdown-item" data-brush-size="30">Large (30px)</div>
+                        <div class="dropdown-item" data-brush-size="50">X-Large (50px)</div>
+                    </div>
+                </div>
                 <button id="btn-pan" class="mode-btn" data-mode="5" title="Pan Mode (H)">
                     Pan
                 </button>

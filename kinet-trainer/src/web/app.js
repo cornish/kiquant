@@ -10,7 +10,8 @@ const Mode = {
     OTHER: 2,
     SELECT: 3,
     ERASER: 4,
-    PAN: 5
+    PAN: 5,
+    BRUSH: 6
 };
 
 const MarkerClass = {
@@ -64,6 +65,14 @@ let eraserImagePos = null;
 let eraserHistorySaved = false;
 let eraserPending = false;
 
+// Brush state (like eraser but changes class instead of deleting)
+let brushRadius = 15;
+let brushClass = MarkerClass.POSITIVE; // Class to paint markers to
+let isBrushing = false;
+let brushImagePos = null;
+let brushHistorySaved = false;
+let brushPending = false;
+
 // Selection state
 let isSelecting = false;
 let selectionStartX = 0;
@@ -72,6 +81,8 @@ let selectionEndX = 0;
 let selectionEndY = 0;
 let selectionType = 'rect'; // 'rect' or 'lasso'
 let lassoPoints = []; // For lasso selection
+let selectionAdditive = false; // Shift held = add to selection
+let selectionClickStart = null; // Track click position for single-click select
 
 // Overview drag state
 let isOverviewDragging = false;
@@ -173,7 +184,10 @@ function init() {
         selectMenu: document.getElementById('select-menu'),
         // Eraser dropdown
         btnEraserDropdown: document.getElementById('btn-eraser-dropdown'),
-        eraserMenu: document.getElementById('eraser-menu')
+        eraserMenu: document.getElementById('eraser-menu'),
+        // Brush dropdown
+        btnBrushDropdown: document.getElementById('btn-brush-dropdown'),
+        brushMenu: document.getElementById('brush-menu')
     };
 
     canvas = elements.canvas;
@@ -254,6 +268,10 @@ function bindEvents() {
         if (!elements.eraserMenu.contains(e.target) && !elements.btnEraserDropdown.contains(e.target)) {
             elements.eraserMenu.classList.add('hidden');
         }
+        // Hide brush menu
+        if (!elements.brushMenu.contains(e.target) && !elements.btnBrushDropdown.contains(e.target)) {
+            elements.brushMenu.classList.add('hidden');
+        }
     }, true);
 
     // Keyboard shortcuts
@@ -285,6 +303,10 @@ function bindEvents() {
     // Eraser size dropdown
     elements.btnEraserDropdown.addEventListener('click', toggleEraserMenu);
     elements.eraserMenu.addEventListener('click', handleEraserMenuAction);
+
+    // Brush dropdown
+    elements.btnBrushDropdown.addEventListener('click', toggleBrushMenu);
+    elements.brushMenu.addEventListener('click', handleBrushMenuAction);
 
     // About modal
     elements.aboutClose.addEventListener('click', () => elements.aboutModal.classList.add('hidden'));
@@ -468,6 +490,54 @@ function handleEraserMenuAction(e) {
     setMode(Mode.ERASER);
 }
 
+// ============== Brush Menu ==============
+
+function toggleBrushMenu(e) {
+    e.stopPropagation();
+    elements.brushMenu.classList.toggle('hidden');
+    elements.selectMenu.classList.add('hidden');
+    elements.eraserMenu.classList.add('hidden');
+    updateBrushMenuUI();
+}
+
+function updateBrushMenuUI() {
+    // Update class selection
+    document.querySelectorAll('#brush-menu .dropdown-item[data-brush-class]').forEach(item => {
+        item.classList.toggle('active', parseInt(item.dataset.brushClass) === brushClass);
+    });
+    // Update size selection
+    document.querySelectorAll('#brush-menu .dropdown-item[data-brush-size]').forEach(item => {
+        item.classList.toggle('size-active', parseInt(item.dataset.brushSize) === brushRadius);
+    });
+}
+
+function handleBrushMenuAction(e) {
+    const item = e.target.closest('.dropdown-item');
+    if (!item) return;
+
+    if (item.dataset.brushClass !== undefined) {
+        brushClass = parseInt(item.dataset.brushClass);
+    }
+    if (item.dataset.brushSize !== undefined) {
+        brushRadius = parseInt(item.dataset.brushSize);
+    }
+
+    updateBrushMenuUI();
+    elements.brushMenu.classList.add('hidden');
+
+    // Switch to brush mode when changing brush settings
+    setMode(Mode.BRUSH);
+}
+
+function getBrushColor() {
+    switch (brushClass) {
+        case MarkerClass.POSITIVE: return POSITIVE_COLOR;
+        case MarkerClass.NEGATIVE: return NEGATIVE_COLOR;
+        case MarkerClass.OTHER: return OTHER_COLOR;
+        default: return '#888';
+    }
+}
+
 async function handleFileMenuAction(e) {
     const item = e.target.closest('.dropdown-item');
     if (!item) return;
@@ -595,7 +665,7 @@ function onEvalProgress(message, progress) {
 // ============== Undo/Redo ==============
 
 async function handleUndo() {
-    if (!isProjectLoaded) return;
+    if (!isProjectLoaded || isLocked()) return;
     const result = await eel.undo()();
     if (result) {
         markers = result.markers;
@@ -609,7 +679,7 @@ async function handleUndo() {
 }
 
 async function handleRedo() {
-    if (!isProjectLoaded) return;
+    if (!isProjectLoaded || isLocked()) return;
     const result = await eel.redo()();
     if (result) {
         markers = result.markers;
@@ -643,6 +713,7 @@ async function loadCurrentImage() {
         canvas.height = data.height;
         markers = data.markers;
         currentReviewStatus = data.review_status || 0;
+        updateReviewButton();
 
         if (isFirstLoad) {
             zoomToFit();
@@ -689,6 +760,7 @@ async function loadImageData(data) {
         canvas.height = data.height;
         markers = data.markers;
         currentReviewStatus = data.review_status || 0;
+        updateReviewButton();
         constrainPan();
         render();
         renderOverview();
@@ -1016,9 +1088,15 @@ function panToOverviewPoint(e) {
 // ============== Mode Handling ==============
 
 function setMode(mode) {
+    // Clear eraser state when leaving eraser mode
     if (currentMode === Mode.ERASER && mode !== Mode.ERASER) {
         eraserImagePos = null;
         isErasing = false;
+    }
+    // Clear brush state when leaving brush mode
+    if (currentMode === Mode.BRUSH && mode !== Mode.BRUSH) {
+        brushImagePos = null;
+        isBrushing = false;
     }
     currentMode = mode;
     eel.set_mode(mode);
@@ -1030,9 +1108,9 @@ function updateModeUI() {
         btn.classList.toggle('active', parseInt(btn.dataset.mode) === currentMode);
     });
 
-    canvas.classList.remove('mode-positive', 'mode-negative', 'mode-other', 'mode-select', 'mode-eraser', 'mode-pan');
-    const modeNames = ['Positive', 'Negative', 'Other', 'Select', 'Eraser', 'Pan'];
-    const modeClasses = ['mode-positive', 'mode-negative', 'mode-other', 'mode-select', 'mode-eraser', 'mode-pan'];
+    canvas.classList.remove('mode-positive', 'mode-negative', 'mode-other', 'mode-select', 'mode-eraser', 'mode-pan', 'mode-brush');
+    const modeNames = ['Positive', 'Negative', 'Other', 'Select', 'Eraser', 'Pan', 'Brush'];
+    const modeClasses = ['mode-positive', 'mode-negative', 'mode-other', 'mode-select', 'mode-eraser', 'mode-pan', 'mode-brush'];
     canvas.classList.add(modeClasses[currentMode]);
     elements.statusMode.textContent = 'Mode: ' + modeNames[currentMode];
 }
@@ -1059,6 +1137,18 @@ function getClampedImageCoords(e) {
     };
 }
 
+function findMarkerAtPosition(x, y, hitRadius = MARKER_RADIUS + 2) {
+    // Find marker within hit radius of position
+    for (let i = markers.length - 1; i >= 0; i--) {
+        const m = markers[i];
+        const dist = Math.sqrt(Math.pow(m.x - x, 2) + Math.pow(m.y - y, 2));
+        if (dist <= hitRadius) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 async function handleCanvasMouseDown(e) {
     if (!isProjectLoaded || !currentImage) return;
 
@@ -1078,6 +1168,7 @@ async function handleCanvasMouseDown(e) {
     }
 
     if (currentMode === Mode.POSITIVE || currentMode === Mode.NEGATIVE || currentMode === Mode.OTHER) {
+        if (isLocked()) return; // Prevent editing when reviewed
         if (isLeftClick) {
             const markerClass = currentMode; // Mode values match MarkerClass values
             const result = await eel.add_marker(coords.x, coords.y, markerClass)();
@@ -1093,6 +1184,8 @@ async function handleCanvasMouseDown(e) {
         }
     } else if (currentMode === Mode.SELECT) {
         if (isLeftClick) {
+            selectionAdditive = e.shiftKey;
+            selectionClickStart = { x: coords.x, y: coords.y };
             isSelecting = true;
             selectionStartX = coords.x;
             selectionStartY = coords.y;
@@ -1103,11 +1196,20 @@ async function handleCanvasMouseDown(e) {
             }
         }
     } else if (currentMode === Mode.ERASER) {
+        if (isLocked()) return; // Prevent editing when reviewed
         if (isLeftClick) {
             isErasing = true;
             eraserHistorySaved = false;
             eraserImagePos = { x: coords.x, y: coords.y };
             eraseAtPosition(coords.x, coords.y);
+        }
+    } else if (currentMode === Mode.BRUSH) {
+        if (isLocked()) return; // Prevent editing when reviewed
+        if (isLeftClick) {
+            isBrushing = true;
+            brushHistorySaved = false;
+            brushImagePos = { x: coords.x, y: coords.y };
+            brushAtPosition(coords.x, coords.y);
         }
     }
 }
@@ -1152,6 +1254,16 @@ function handleCanvasMouseMove(e) {
         render();
         return;
     }
+
+    if (currentMode === Mode.BRUSH) {
+        const coords = getImageCoords(e);
+        brushImagePos = { x: coords.x, y: coords.y };
+        if (isBrushing && !brushPending) {
+            brushAtPosition(coords.x, coords.y);
+        }
+        render();
+        return;
+    }
 }
 
 function handleCanvasMouseUp(e) {
@@ -1163,12 +1275,26 @@ function handleCanvasMouseUp(e) {
 
     if (currentMode === Mode.SELECT && isSelecting) {
         isSelecting = false;
+        const coords = getImageCoords(e);
 
-        if (selectionType === 'lasso' && lassoPoints.length > 2) {
+        // Check if this was a single click (minimal movement)
+        const dx = Math.abs(coords.x - selectionClickStart.x);
+        const dy = Math.abs(coords.y - selectionClickStart.y);
+        const isSingleClick = dx < 3 && dy < 3;
+
+        if (isSingleClick) {
+            // Single click - select marker under cursor
+            const markerIdx = findMarkerAtPosition(coords.x, coords.y);
+            if (markerIdx >= 0) {
+                selectMarkerAtIndex(markerIdx, selectionAdditive);
+            } else if (!selectionAdditive) {
+                // Click on empty space without shift - deselect all
+                deselectAllMarkers();
+            }
+        } else if (selectionType === 'lasso' && lassoPoints.length > 2) {
             // Close the lasso and select markers inside polygon
-            const coords = getImageCoords(e);
             lassoPoints.push(coords);
-            selectMarkersInPolygon(lassoPoints);
+            selectMarkersInPolygon(lassoPoints, selectionAdditive);
             lassoPoints = [];
         } else if (selectionType === 'rect') {
             const x = Math.min(selectionStartX, selectionEndX);
@@ -1176,10 +1302,11 @@ function handleCanvasMouseUp(e) {
             const w = Math.abs(selectionEndX - selectionStartX);
             const h = Math.abs(selectionEndY - selectionStartY);
             if (w > 2 || h > 2) {
-                selectMarkersInRect(x, y, w, h);
+                selectMarkersInRect(x, y, w, h, selectionAdditive);
             }
         }
 
+        selectionClickStart = null;
         render();
         return;
     }
@@ -1190,11 +1317,18 @@ function handleCanvasMouseUp(e) {
         renderOverview();
         updateCurrentImageListItem();
     }
+
+    if (currentMode === Mode.BRUSH && isBrushing) {
+        isBrushing = false;
+        brushHistorySaved = false;
+        renderOverview();
+        updateCurrentImageListItem();
+    }
 }
 
 function handleCanvasMouseLeave(e) {
     // Don't cancel selection or panning - let document handlers continue tracking
-    // Only cancel eraser (we don't want eraser to work outside canvas)
+    // Only cancel eraser/brush (we don't want them to work outside canvas)
     if (isErasing) {
         isErasing = false;
         eraserHistorySaved = false;
@@ -1202,6 +1336,15 @@ function handleCanvasMouseLeave(e) {
     }
     if (currentMode === Mode.ERASER) {
         eraserImagePos = null;
+        render();
+    }
+    if (isBrushing) {
+        isBrushing = false;
+        brushHistorySaved = false;
+        renderOverview();
+    }
+    if (currentMode === Mode.BRUSH) {
+        brushImagePos = null;
         render();
     }
 }
@@ -1252,7 +1395,7 @@ function handleDocumentMouseUp(e) {
 
         if (selectionType === 'lasso' && lassoPoints.length > 2) {
             lassoPoints.push(coords);
-            selectMarkersInPolygon(lassoPoints);
+            selectMarkersInPolygon(lassoPoints, selectionAdditive);
             lassoPoints = [];
         } else if (selectionType === 'rect') {
             const x = Math.min(selectionStartX, selectionEndX);
@@ -1260,9 +1403,10 @@ function handleDocumentMouseUp(e) {
             const w = Math.abs(selectionEndX - selectionStartX);
             const h = Math.abs(selectionEndY - selectionStartY);
             if (w > 2 || h > 2) {
-                selectMarkersInRect(x, y, w, h);
+                selectMarkersInRect(x, y, w, h, selectionAdditive);
             }
         }
+        selectionClickStart = null;
         render();
     }
 }
@@ -1314,6 +1458,60 @@ function drawEraserCursorOnOverlay(imgLeft, imgTop) {
     overlayCtx.stroke();
 }
 
+// ============== Brush (paint class change) ==============
+
+function brushAtPosition(imgX, imgY) {
+    if (brushPending) return;
+    brushPending = true;
+
+    const saveHistory = !brushHistorySaved;
+    if (saveHistory) brushHistorySaved = true;
+
+    eel.change_markers_in_radius(imgX, imgY, brushRadius, brushClass, saveHistory)().then(result => {
+        brushPending = false;
+        if (result && result.changed_count > 0) {
+            markers = result.markers;
+            updateCounts(result.positive_count, result.negative_count, result.other_count);
+            updateUndoRedoButtons(result.can_undo, result.can_redo);
+            markUnsavedChanges();
+            render();
+        }
+    }).catch(() => { brushPending = false; });
+}
+
+function drawBrushCursorOnOverlay(imgLeft, imgTop) {
+    if (!brushImagePos || currentMode !== Mode.BRUSH) return;
+
+    const screenRadius = brushRadius * zoom;
+    const x = imgLeft + brushImagePos.x * zoom;
+    const y = imgTop + brushImagePos.y * zoom;
+
+    // Use the brush color based on selected class
+    const color = getBrushColor();
+
+    overlayCtx.beginPath();
+    overlayCtx.arc(x, y, screenRadius, 0, Math.PI * 2);
+    overlayCtx.strokeStyle = color;
+    overlayCtx.lineWidth = 2;
+    overlayCtx.stroke();
+
+    // Subtle fill with brush color (convert hex to rgba)
+    overlayCtx.globalAlpha = 0.15;
+    overlayCtx.fillStyle = color;
+    overlayCtx.fill();
+    overlayCtx.globalAlpha = 1.0;
+
+    // Crosshair at center
+    overlayCtx.beginPath();
+    overlayCtx.moveTo(x - 5, y);
+    overlayCtx.lineTo(x + 5, y);
+    overlayCtx.moveTo(x, y - 5);
+    overlayCtx.lineTo(x, y + 5);
+    overlayCtx.strokeStyle = color;
+    overlayCtx.lineWidth = 1;
+    overlayCtx.stroke();
+}
+
 // ============== Keyboard Handlers ==============
 
 async function handleKeyDown(e) {
@@ -1343,6 +1541,7 @@ async function handleKeyDown(e) {
         case 's': setMode(Mode.SELECT); break;
         case 'e': setMode(Mode.ERASER); break;
         case 'h': setMode(Mode.PAN); break;
+        case 'b': setMode(Mode.BRUSH); break;
         case 'a':
             if (e.ctrlKey || e.metaKey) {
                 e.preventDefault();
@@ -1448,6 +1647,7 @@ function renderOverlayMarkers(viewWidth, viewHeight, imgLeft, imgTop) {
 
     drawSelectionRect(imgLeft, imgTop);
     drawEraserCursorOnOverlay(imgLeft, imgTop);
+    drawBrushCursorOnOverlay(imgLeft, imgTop);
 }
 
 function drawMarkerOnOverlay(marker, screenX, screenY) {
@@ -1548,8 +1748,40 @@ async function showDetectModal(mode) {
         return;
     }
 
+    // Prevent detection on locked (reviewed) images
+    if (mode === 'current' && isLocked()) {
+        alert('This image is locked (reviewed). Unlock it first to run detection.');
+        return;
+    }
+
+    // Warn if current image has existing markers
+    if (mode === 'current' && markers.length > 0) {
+        if (!confirm(`This image has ${markers.length} existing markers.\n\nDetection will replace all markers. Continue?`)) {
+            return;
+        }
+    }
+
     detectMode = mode;
     elements.detectModalTitle.textContent = mode === 'all' ? 'Detect All Images' : 'Detect Current Image';
+
+    // Check for existing annotations when detecting all
+    if (mode === 'all') {
+        const stats = await eel.get_annotation_stats()();
+        if (stats.images_with_markers > 0 || stats.images_reviewed > 0) {
+            let warning = 'Warning: This will overwrite existing annotations!\n\n';
+            if (stats.images_with_markers > 0) {
+                warning += `• ${stats.images_with_markers} images have markers (${stats.total_markers} total)\n`;
+            }
+            if (stats.images_reviewed > 0) {
+                warning += `• ${stats.images_reviewed} images are marked as reviewed\n`;
+            }
+            warning += '\nAll markers will be replaced and review status will be reset.\n\nContinue?';
+
+            if (!confirm(warning)) {
+                return;
+            }
+        }
+    }
 
     // Populate model dropdown
     showProgress('Loading models...');
@@ -1729,12 +1961,30 @@ async function showModelBrowser() {
 
 // ============== Review Status ==============
 
+function isLocked() {
+    return currentReviewStatus === ReviewStatus.REVIEWED;
+}
+
+function updateReviewButton() {
+    if (isLocked()) {
+        elements.btnReviewed.textContent = 'Unlock';
+        elements.btnReviewed.title = 'Unlock for Editing (R)';
+        elements.btnReviewed.classList.add('locked');
+    } else {
+        elements.btnReviewed.textContent = 'Mark Reviewed';
+        elements.btnReviewed.title = 'Mark Reviewed & Next (R)';
+        elements.btnReviewed.classList.remove('locked');
+    }
+    // Update canvas locked state
+    canvas.classList.toggle('locked', isLocked());
+}
+
 async function handleMarkReviewed() {
     if (!isProjectLoaded) return;
 
-    const data = await eel.mark_reviewed_and_next()();
-    if (data && !data.error) {
-        loadImageData(data);
+    const result = await eel.toggle_reviewed()();
+    if (result && result.data && !result.data.error) {
+        loadImageData(result.data);
         await updateImageList();
         updateReviewSummary();
     }
@@ -1745,6 +1995,7 @@ async function handleSetNeedsReview() {
 
     await eel.set_review_status(ReviewStatus.NEEDS_REVIEW)();
     currentReviewStatus = ReviewStatus.NEEDS_REVIEW;
+    updateReviewButton();
     updateCurrentImageListItem();
     updateReviewSummary();
 }
@@ -1819,7 +2070,7 @@ async function handleInvertSelection() {
 }
 
 async function handleChangeClass(newClass) {
-    if (!isProjectLoaded) return;
+    if (!isProjectLoaded || isLocked()) return;
     const result = await eel.change_selected_class(newClass)();
     if (result) {
         markers = result.markers;
@@ -1832,7 +2083,7 @@ async function handleChangeClass(newClass) {
 }
 
 async function handleDeleteSelected() {
-    if (!isProjectLoaded) return;
+    if (!isProjectLoaded || isLocked()) return;
     const result = await eel.delete_selected()();
     if (result) {
         markers = result.markers;
@@ -1844,18 +2095,36 @@ async function handleDeleteSelected() {
     }
 }
 
-async function selectMarkersInRect(x, y, width, height) {
+async function selectMarkersInRect(x, y, width, height, additive = false) {
     if (!isProjectLoaded) return;
-    const result = await eel.select_markers_in_rect(x, y, width, height)();
+    const result = await eel.select_markers_in_rect(x, y, width, height, additive)();
     if (result) {
         markers = result.markers;
         render();
     }
 }
 
-async function selectMarkersInPolygon(points) {
+async function selectMarkersInPolygon(points, additive = false) {
     if (!isProjectLoaded || points.length < 3) return;
-    const result = await eel.select_markers_in_polygon(points)();
+    const result = await eel.select_markers_in_polygon(points, additive)();
+    if (result) {
+        markers = result.markers;
+        render();
+    }
+}
+
+async function selectMarkerAtIndex(index, additive = false) {
+    if (!isProjectLoaded) return;
+    const result = await eel.select_marker_at_index(index, additive)();
+    if (result) {
+        markers = result.markers;
+        render();
+    }
+}
+
+async function deselectAllMarkers() {
+    if (!isProjectLoaded) return;
+    const result = await eel.deselect_all()();
     if (result) {
         markers = result.markers;
         render();

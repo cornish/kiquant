@@ -479,19 +479,88 @@ def select_marker_at(x, y):
 
 
 @eel.expose
-def select_markers_in_rect(x, y, width, height):
+def select_markers_in_rect(x, y, width, height, additive=False):
     """Select all markers within rectangle."""
     field = state.get_current_field()
     if not field:
         return None
 
-    field.deselect_all()
-    count = field.select_markers_in_rect(int(x), int(y), int(width), int(height))
+    if not additive:
+        field.deselect_all()
+
+    # Select markers in rectangle
+    x, y, width, height = int(x), int(y), int(width), int(height)
+    count = 0
+    for m in field.markers:
+        if x <= m.x <= x + width and y <= m.y <= y + height:
+            m.selected = True
+            count += 1
 
     return {
         'selected_count': count,
         'markers': [m.to_dict() for m in field.markers]
     }
+
+
+@eel.expose
+def select_markers_in_polygon(points, additive=False):
+    """Select all markers within polygon (lasso selection)."""
+    field = state.get_current_field()
+    if not field:
+        return None
+
+    if not additive:
+        field.deselect_all()
+
+    if len(points) < 3:
+        return {
+            'selected_count': 0,
+            'markers': [m.to_dict() for m in field.markers]
+        }
+
+    # Point-in-polygon test using ray casting
+    def point_in_polygon(x, y, polygon):
+        n = len(polygon)
+        inside = False
+        j = n - 1
+        for i in range(n):
+            xi, yi = polygon[i]
+            xj, yj = polygon[j]
+            if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi) + xi):
+                inside = not inside
+            j = i
+        return inside
+
+    count = 0
+    for m in field.markers:
+        if point_in_polygon(m.x, m.y, points):
+            m.selected = True
+            count += 1
+
+    return {
+        'selected_count': count,
+        'markers': [m.to_dict() for m in field.markers]
+    }
+
+
+@eel.expose
+def select_marker_at_index(index, additive=False):
+    """Select a single marker by its index."""
+    field = state.get_current_field()
+    if not field:
+        return None
+
+    if index < 0 or index >= len(field.markers):
+        return {'markers': [m.to_dict() for m in field.markers]}
+
+    if not additive:
+        field.deselect_all()
+        field.markers[index].selected = True
+    else:
+        # Toggle selection in additive mode
+        field.markers[index].selected = not field.markers[index].selected
+
+    return {'markers': [m.to_dict() for m in field.markers]}
 
 
 @eel.expose

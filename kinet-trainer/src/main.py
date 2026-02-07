@@ -459,6 +459,39 @@ def delete_markers_in_radius(x, y, radius, save_history=True):
     return resp
 
 
+@eel.expose
+def change_markers_in_radius(x, y, radius, new_class, save_history=True):
+    """Change class of all markers within radius of point (x, y). Used for brush tool."""
+    field = state.get_current_field()
+    if not field:
+        return None
+
+    x, y, radius = int(x), int(y), int(radius)
+    new_class = int(new_class)
+    radius_sq = radius * radius
+
+    changed_count = 0
+    markers_to_change = []
+    for marker in field.markers:
+        dx = marker.x - x
+        dy = marker.y - y
+        if dx * dx + dy * dy <= radius_sq:
+            if marker.marker_class != new_class:
+                markers_to_change.append(marker)
+
+    if markers_to_change and save_history:
+        _save_to_history()
+
+    for marker in markers_to_change:
+        marker.marker_class = new_class
+        changed_count += 1
+
+    resp = _marker_response()
+    if resp:
+        resp['changed_count'] = changed_count
+    return resp
+
+
 # ============== Undo/Redo ==============
 
 @eel.expose
@@ -544,11 +577,14 @@ def invert_selection():
 
 
 @eel.expose
-def select_markers_in_rect(x, y, width, height):
-    """Select all markers within rectangle."""
+def select_markers_in_rect(x, y, width, height, additive=False):
+    """Select all markers within rectangle. If not additive, deselect others first."""
     field = state.get_current_field()
     if not field:
         return None
+    if not additive:
+        for m in field.markers:
+            m.selected = False
     for m in field.markers:
         if x <= m.x <= x + width and y <= m.y <= y + height:
             m.selected = True
@@ -570,16 +606,37 @@ def _point_in_polygon(x, y, polygon):
 
 
 @eel.expose
-def select_markers_in_polygon(points):
-    """Select all markers within polygon (lasso selection)."""
+def select_markers_in_polygon(points, additive=False):
+    """Select all markers within polygon (lasso selection). If not additive, deselect others first."""
     field = state.get_current_field()
     if not field:
         return None
     if len(points) < 3:
         return _marker_response()
+    if not additive:
+        for m in field.markers:
+            m.selected = False
     for m in field.markers:
         if _point_in_polygon(m.x, m.y, points):
             m.selected = True
+    return _marker_response()
+
+
+@eel.expose
+def select_marker_at_index(index, additive=False):
+    """Select/toggle marker at given index. If not additive, deselect others first."""
+    field = state.get_current_field()
+    if not field:
+        return None
+    if index < 0 or index >= len(field.markers):
+        return _marker_response()
+    if not additive:
+        for m in field.markers:
+            m.selected = False
+        field.markers[index].selected = True
+    else:
+        # Toggle selection when additive
+        field.markers[index].selected = not field.markers[index].selected
     return _marker_response()
 
 
@@ -728,6 +785,36 @@ def set_default_model(model_id):
     return model_registry.set_default_model(model_id)
 
 
+@eel.expose
+def get_annotation_stats():
+    """Get statistics about existing annotations for warning before detect all."""
+    if not state.fields:
+        return {
+            'total_images': 0,
+            'images_with_markers': 0,
+            'images_reviewed': 0,
+            'total_markers': 0
+        }
+
+    images_with_markers = 0
+    images_reviewed = 0
+    total_markers = 0
+
+    for field in state.fields:
+        if field.markers:
+            images_with_markers += 1
+            total_markers += len(field.markers)
+        if field.review_status == ReviewStatus.REVIEWED:
+            images_reviewed += 1
+
+    return {
+        'total_images': len(state.fields),
+        'images_with_markers': images_with_markers,
+        'images_reviewed': images_reviewed,
+        'total_markers': total_markers
+    }
+
+
 # ============== Detection ==============
 
 def _run_detection_on_field(field_obj, threshold=0.3, min_distance=5):
@@ -862,6 +949,38 @@ def mark_reviewed_and_next():
     else:
         # No more unreviewed — stay on current
         return get_image_data()
+
+
+@eel.expose
+def toggle_reviewed():
+    """Toggle review status: if reviewed, unlock; if not, mark reviewed and advance."""
+    field = state.get_current_field()
+    if not field:
+        return None
+
+    if field.review_status == ReviewStatus.REVIEWED:
+        # Unlock - set back to needs review
+        field.review_status = ReviewStatus.NEEDS_REVIEW
+        save_project()
+        return {
+            'action': 'unlocked',
+            'data': get_image_data()
+        }
+    else:
+        # Lock - mark as reviewed and advance
+        field.review_status = ReviewStatus.REVIEWED
+        save_project()
+
+        # Find next unreviewed
+        next_idx = state.find_next_unreviewed(state.current_index)
+        if next_idx is not None:
+            state.go_to_field(next_idx)
+        # Stay on current if no more unreviewed
+
+        return {
+            'action': 'locked',
+            'data': get_image_data()
+        }
 
 
 @eel.expose

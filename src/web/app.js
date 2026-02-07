@@ -60,6 +60,8 @@ let overviewAnimationFrame = null;
 let showGuide = true;
 let selectionType = 'rect'; // 'rect' or 'lasso'
 let lassoPoints = []; // For lasso selection
+let selectionAdditive = false; // Shift held = add to selection
+let selectionClickStart = null; // Track click position for single-click select
 
 // Track unsaved changes
 let hasUnsavedChanges = false;
@@ -1144,6 +1146,18 @@ function getClampedImageCoords(e) {
     };
 }
 
+function findMarkerAtPosition(x, y, hitRadius = MARKER_RADIUS + 2) {
+    // Find marker within hit radius of position
+    for (let i = markers.length - 1; i >= 0; i--) {
+        const m = markers[i];
+        const dist = Math.sqrt(Math.pow(m.x - x, 2) + Math.pow(m.y - y, 2));
+        if (dist <= hitRadius) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 async function handleCanvasMouseDown(e) {
     if (!isProjectLoaded || !currentImage) return;
 
@@ -1185,6 +1199,8 @@ async function handleCanvasMouseDown(e) {
         // Right-click is handled by handleContextMenu
     } else if (currentMode === Mode.SELECT) {
         if (isLeftClick) {
+            selectionAdditive = e.shiftKey;
+            selectionClickStart = { x: coords.x, y: coords.y };
             isDragging = true;
             dragStart = coords;
             dragEnd = coords;
@@ -1449,45 +1465,40 @@ async function handleCanvasMouseUp(e) {
     }
 
     if (currentMode === Mode.SELECT && isDragging) {
+        isDragging = false;
         const coords = getImageCoords(e);
         dragEnd = coords;
 
-        if (selectionType === 'rect') {
+        // Check if this was a single click (minimal movement)
+        const dx = Math.abs(coords.x - selectionClickStart.x);
+        const dy = Math.abs(coords.y - selectionClickStart.y);
+        const isSingleClick = dx < 3 && dy < 3;
+
+        if (isSingleClick) {
+            // Single click - select marker under cursor
+            const markerIdx = findMarkerAtPosition(coords.x, coords.y);
+            if (markerIdx >= 0) {
+                await selectMarkerAtIndex(markerIdx, selectionAdditive);
+            } else if (!selectionAdditive) {
+                // Click on empty space without shift - deselect all
+                await deselectAllMarkers();
+            }
+        } else if (selectionType === 'lasso' && lassoPoints.length > 2) {
+            // Close the lasso and select markers inside polygon
+            lassoPoints.push(coords);
+            await selectMarkersInPolygon(lassoPoints, selectionAdditive);
+            lassoPoints = [];
+        } else if (selectionType === 'rect') {
             const x = Math.min(dragStart.x, dragEnd.x);
             const y = Math.min(dragStart.y, dragEnd.y);
             const w = Math.abs(dragEnd.x - dragStart.x);
             const h = Math.abs(dragEnd.y - dragStart.y);
-
-            if (w > 5 && h > 5) {
-                const result = await eel.select_markers_in_rect(x, y, w, h)();
-                if (result) {
-                    markers = result.markers;
-                    render();
-                }
-            } else {
-                const result = await eel.select_marker_at(coords.x, coords.y)();
-                if (result) {
-                    markers = result.markers;
-                    render();
-                }
-            }
-        } else if (selectionType === 'lasso' && lassoPoints.length > 2) {
-            // Close the lasso
-            lassoPoints.push(coords);
-
-            // Select markers inside the lasso polygon
-            await selectMarkersInPolygon(lassoPoints);
-            lassoPoints = [];
-        } else {
-            // Single click - point selection
-            const result = await eel.select_marker_at(coords.x, coords.y)();
-            if (result) {
-                markers = result.markers;
-                render();
+            if (w > 2 || h > 2) {
+                await selectMarkersInRect(x, y, w, h, selectionAdditive);
             }
         }
 
-        isDragging = false;
+        selectionClickStart = null;
         render();
     }
 }
@@ -1506,32 +1517,36 @@ function isPointInPolygon(x, y, polygon) {
     return inside;
 }
 
-async function selectMarkersInPolygon(polygon) {
-    // Deselect all first
-    await eel.deselect_all()();
-
-    // Find markers inside polygon and select them
-    const markersToSelect = [];
-    markers.forEach((m, idx) => {
-        if (isPointInPolygon(m.x, m.y, polygon)) {
-            markersToSelect.push(idx);
-        }
-    });
-
-    if (markersToSelect.length > 0) {
-        // Select markers by their indices
-        const result = await eel.select_markers_by_indices(markersToSelect)();
-        if (result) {
-            markers = result.markers;
-        }
-    } else {
-        // Just refresh markers
-        const result = await eel.get_markers()();
-        if (result) {
-            markers = result;
-        }
+async function selectMarkersInRect(x, y, width, height, additive = false) {
+    const result = await eel.select_markers_in_rect(x, y, width, height, additive)();
+    if (result) {
+        markers = result.markers;
+        render();
     }
-    render();
+}
+
+async function selectMarkersInPolygon(polygon, additive = false) {
+    const result = await eel.select_markers_in_polygon(polygon, additive)();
+    if (result) {
+        markers = result.markers;
+        render();
+    }
+}
+
+async function selectMarkerAtIndex(index, additive = false) {
+    const result = await eel.select_marker_at_index(index, additive)();
+    if (result) {
+        markers = result.markers;
+        render();
+    }
+}
+
+async function deselectAllMarkers() {
+    const result = await eel.deselect_all()();
+    if (result) {
+        markers = result.markers;
+        render();
+    }
 }
 
 function handleCanvasMouseLeave(e) {
@@ -1594,7 +1609,7 @@ async function handleDocumentMouseUp(e) {
 
         if (selectionType === 'lasso' && lassoPoints.length > 2) {
             lassoPoints.push(coords);
-            await selectMarkersInPolygon(lassoPoints);
+            await selectMarkersInPolygon(lassoPoints, selectionAdditive);
             lassoPoints = [];
         } else if (selectionType === 'rect') {
             const x = Math.min(dragStart.x, dragEnd.x);
@@ -1602,9 +1617,10 @@ async function handleDocumentMouseUp(e) {
             const w = Math.abs(dragEnd.x - dragStart.x);
             const h = Math.abs(dragEnd.y - dragStart.y);
             if (w > 2 || h > 2) {
-                await selectMarkersInRect(x, y, w, h);
+                await selectMarkersInRect(x, y, w, h, selectionAdditive);
             }
         }
+        selectionClickStart = null;
         render();
     }
 }
