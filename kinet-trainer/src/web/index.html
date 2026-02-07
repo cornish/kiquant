@@ -53,10 +53,13 @@
                 <button id="btn-other" class="mode-btn" data-mode="2" title="Non-tumor / Other (O)">
                     <span class="marker-icon other">o</span> Other
                 </button>
-                <button id="btn-eraser" class="mode-btn" data-mode="3" title="Eraser Mode (E)">
+                <button id="btn-select" class="mode-btn" data-mode="3" title="Select Mode (S)">
+                    Select
+                </button>
+                <button id="btn-eraser" class="mode-btn" data-mode="4" title="Eraser Mode (E)">
                     Eraser
                 </button>
-                <button id="btn-pan" class="mode-btn" data-mode="4" title="Pan Mode (H)">
+                <button id="btn-pan" class="mode-btn" data-mode="5" title="Pan Mode (H)">
                     Pan
                 </button>
             </div>
@@ -73,14 +76,6 @@
 
             <button id="btn-reviewed" class="toolbar-btn review-btn" title="Mark Reviewed & Next (R)">Mark Reviewed</button>
 
-            <div class="toolbar-separator"></div>
-
-            <div class="toolbar-group counts">
-                <span class="count positive-count">Pos: <span id="count-positive">0</span></span>
-                <span class="count negative-count">Neg: <span id="count-negative">0</span></span>
-                <span class="count other-count">Other: <span id="count-other">0</span></span>
-                <span class="count total-count">Total: <span id="count-total">0</span></span>
-            </div>
         </div>
 
         <!-- Main Layout: Sidebar + Canvas -->
@@ -131,6 +126,23 @@
                     <button id="btn-zoom-100" class="zoom-btn zoom-btn-text" title="Actual Size (1)">1:1</button>
                 </div>
             </div>
+        </div>
+
+        <!-- Context Menu -->
+        <div id="context-menu" class="context-menu hidden">
+            <div class="context-menu-item" data-action="mode-positive"><span class="menu-icon positive">+</span> Positive Mode</div>
+            <div class="context-menu-item" data-action="mode-negative"><span class="menu-icon negative">-</span> Negative Mode</div>
+            <div class="context-menu-item" data-action="mode-other"><span class="menu-icon other">o</span> Other Mode</div>
+            <div class="context-menu-item" data-action="mode-pan"><span class="menu-icon pan">&#9995;</span> Pan Mode</div>
+            <div class="context-menu-separator"></div>
+            <div class="context-menu-item" data-action="select-all">Select All</div>
+            <div class="context-menu-item" data-action="deselect-all">Deselect All</div>
+            <div class="context-menu-item" data-action="invert-selection">Invert Selection</div>
+            <div class="context-menu-separator"></div>
+            <div class="context-menu-item" data-action="change-positive">Change to Positive</div>
+            <div class="context-menu-item" data-action="change-negative">Change to Negative</div>
+            <div class="context-menu-item" data-action="change-other">Change to Other</div>
+            <div class="context-menu-item" data-action="delete-selected">Delete Selected</div>
         </div>
 
         <!-- Export Settings Modal -->

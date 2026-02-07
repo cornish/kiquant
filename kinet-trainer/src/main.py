@@ -503,6 +503,89 @@ def get_undo_redo_state():
     }
 
 
+# ============== Selection Operations ==============
+
+@eel.expose
+def select_all():
+    """Select all markers on current field."""
+    field = state.get_current_field()
+    if not field:
+        return None
+    for m in field.markers:
+        m.selected = True
+    return _marker_response()
+
+
+@eel.expose
+def deselect_all():
+    """Deselect all markers on current field."""
+    field = state.get_current_field()
+    if not field:
+        return None
+    for m in field.markers:
+        m.selected = False
+    return _marker_response()
+
+
+@eel.expose
+def invert_selection():
+    """Invert selection on current field."""
+    field = state.get_current_field()
+    if not field:
+        return None
+    for m in field.markers:
+        m.selected = not m.selected
+    return _marker_response()
+
+
+@eel.expose
+def select_markers_in_rect(x, y, width, height):
+    """Select all markers within rectangle."""
+    field = state.get_current_field()
+    if not field:
+        return None
+    for m in field.markers:
+        if x <= m.x <= x + width and y <= m.y <= y + height:
+            m.selected = True
+    return _marker_response()
+
+
+@eel.expose
+def change_selected_class(new_class):
+    """Change class of all selected markers."""
+    field = state.get_current_field()
+    if not field:
+        return None
+
+    selected = [m for m in field.markers if m.selected]
+    if not selected:
+        return _marker_response()
+
+    _save_to_history()
+    for m in selected:
+        m.marker_class = new_class
+        m.selected = False
+
+    return _marker_response()
+
+
+@eel.expose
+def delete_selected():
+    """Delete all selected markers."""
+    field = state.get_current_field()
+    if not field:
+        return None
+
+    selected = [m for m in field.markers if m.selected]
+    if not selected:
+        return _marker_response()
+
+    _save_to_history()
+    field.markers = [m for m in field.markers if not m.selected]
+
+    return _marker_response()
+
+
 # ============== Summary ==============
 
 @eel.expose

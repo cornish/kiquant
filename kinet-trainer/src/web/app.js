@@ -8,8 +8,9 @@ const Mode = {
     POSITIVE: 0,
     NEGATIVE: 1,
     OTHER: 2,
-    ERASER: 3,
-    PAN: 4
+    SELECT: 3,
+    ERASER: 4,
+    PAN: 5
 };
 
 const MarkerClass = {
@@ -63,6 +64,13 @@ let eraserImagePos = null;
 let eraserHistorySaved = false;
 let eraserPending = false;
 
+// Selection state
+let isSelecting = false;
+let selectionStartX = 0;
+let selectionStartY = 0;
+let selectionEndX = 0;
+let selectionEndY = 0;
+
 // Overview drag state
 let isOverviewDragging = false;
 let overviewAnimationFrame = null;
@@ -91,10 +99,7 @@ function init() {
         canvasContainer: document.getElementById('canvas-container'),
         welcomeMessage: document.getElementById('welcome-message'),
         progress: document.getElementById('progress'),
-        countPositive: document.getElementById('count-positive'),
-        countNegative: document.getElementById('count-negative'),
-        countOther: document.getElementById('count-other'),
-        countTotal: document.getElementById('count-total'),
+        contextMenu: document.getElementById('context-menu'),
         statusFilename: document.getElementById('status-filename'),
         statusMode: document.getElementById('status-mode'),
         statusSummary: document.getElementById('status-summary'),
@@ -206,8 +211,12 @@ function bindEvents() {
     canvas.addEventListener('mousemove', handleCanvasMouseMove);
     canvas.addEventListener('mouseup', handleCanvasMouseUp);
     canvas.addEventListener('mouseleave', handleCanvasMouseLeave);
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('contextmenu', handleContextMenu);
     canvas.addEventListener('wheel', handleCanvasWheel, { passive: false });
+
+    // Context menu
+    elements.contextMenu.addEventListener('click', handleContextMenuAction);
+    document.addEventListener('mousedown', hideContextMenu);
 
     // Overview panel
     elements.overviewPanel.addEventListener('mousedown', handleOverviewMouseDown);
@@ -939,9 +948,9 @@ function updateModeUI() {
         btn.classList.toggle('active', parseInt(btn.dataset.mode) === currentMode);
     });
 
-    canvas.classList.remove('mode-positive', 'mode-negative', 'mode-other', 'mode-eraser', 'mode-pan');
-    const modeNames = ['Positive', 'Negative', 'Other', 'Eraser', 'Pan'];
-    const modeClasses = ['mode-positive', 'mode-negative', 'mode-other', 'mode-eraser', 'mode-pan'];
+    canvas.classList.remove('mode-positive', 'mode-negative', 'mode-other', 'mode-select', 'mode-eraser', 'mode-pan');
+    const modeNames = ['Positive', 'Negative', 'Other', 'Select', 'Eraser', 'Pan'];
+    const modeClasses = ['mode-positive', 'mode-negative', 'mode-other', 'mode-select', 'mode-eraser', 'mode-pan'];
     canvas.classList.add(modeClasses[currentMode]);
     elements.statusMode.textContent = 'Mode: ' + modeNames[currentMode];
 }
@@ -987,6 +996,14 @@ async function handleCanvasMouseDown(e) {
                 updateCurrentImageListItem();
             }
         }
+    } else if (currentMode === Mode.SELECT) {
+        if (isLeftClick) {
+            isSelecting = true;
+            selectionStartX = coords.x;
+            selectionStartY = coords.y;
+            selectionEndX = coords.x;
+            selectionEndY = coords.y;
+        }
     } else if (currentMode === Mode.ERASER) {
         if (isLeftClick) {
             isErasing = true;
@@ -1009,6 +1026,14 @@ function handleCanvasMouseMove(e) {
         return;
     }
 
+    if (currentMode === Mode.SELECT && isSelecting) {
+        const coords = getImageCoords(e);
+        selectionEndX = coords.x;
+        selectionEndY = coords.y;
+        render();
+        return;
+    }
+
     if (currentMode === Mode.ERASER) {
         const coords = getImageCoords(e);
         eraserImagePos = { x: coords.x, y: coords.y };
@@ -1027,6 +1052,19 @@ function handleCanvasMouseUp(e) {
         return;
     }
 
+    if (currentMode === Mode.SELECT && isSelecting) {
+        isSelecting = false;
+        const x = Math.min(selectionStartX, selectionEndX);
+        const y = Math.min(selectionStartY, selectionEndY);
+        const w = Math.abs(selectionEndX - selectionStartX);
+        const h = Math.abs(selectionEndY - selectionStartY);
+        if (w > 2 || h > 2) {
+            selectMarkersInRect(x, y, w, h);
+        }
+        render();
+        return;
+    }
+
     if (currentMode === Mode.ERASER && isErasing) {
         isErasing = false;
         eraserHistorySaved = false;
@@ -1039,6 +1077,10 @@ function handleCanvasMouseLeave() {
     if (isPanning) {
         isPanning = false;
         canvas.classList.remove('panning');
+    }
+    if (isSelecting) {
+        isSelecting = false;
+        render();
     }
     if (isErasing) {
         isErasing = false;
@@ -1124,8 +1166,31 @@ async function handleKeyDown(e) {
         case 'p': setMode(Mode.POSITIVE); break;
         case 'n': setMode(Mode.NEGATIVE); break;
         case 'o': setMode(Mode.OTHER); break;
+        case 's': setMode(Mode.SELECT); break;
         case 'e': setMode(Mode.ERASER); break;
         case 'h': setMode(Mode.PAN); break;
+        case 'a':
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                handleSelectAll();
+            }
+            break;
+        case 'i':
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                handleInvertSelection();
+            }
+            break;
+        case 'delete':
+        case 'backspace':
+            if (isProjectLoaded) {
+                e.preventDefault();
+                handleDeleteSelected();
+            }
+            break;
+        case 'escape':
+            handleDeselectAll();
+            break;
         case 'r':
             if (isProjectLoaded) {
                 if (e.shiftKey) {
@@ -1207,6 +1272,7 @@ function renderOverlayMarkers(viewWidth, viewHeight, imgLeft, imgTop) {
         drawMarkerOnOverlay(marker, screenX, screenY);
     });
 
+    drawSelectionRect(imgLeft, imgTop);
     drawEraserCursorOnOverlay(imgLeft, imgTop);
 }
 
@@ -1238,10 +1304,8 @@ function updateProgress(current, total) {
 }
 
 function updateCounts(positive, negative, other) {
-    elements.countPositive.textContent = positive;
-    elements.countNegative.textContent = negative;
-    elements.countOther.textContent = other;
-    elements.countTotal.textContent = positive + negative + other;
+    // Counts are tracked but not shown in toolbar (removed per user request)
+    // The sidebar still shows counts per image
 }
 
 async function updateSummary() {
@@ -1513,4 +1577,126 @@ async function handleSetNeedsReview() {
     currentReviewStatus = ReviewStatus.NEEDS_REVIEW;
     updateCurrentImageListItem();
     updateReviewSummary();
+}
+
+// ============== Context Menu ==============
+
+function handleContextMenu(e) {
+    e.preventDefault();
+    if (!isProjectLoaded) return;
+
+    const menu = elements.contextMenu;
+    menu.style.left = e.clientX + 'px';
+    menu.style.top = e.clientY + 'px';
+    menu.classList.remove('hidden');
+}
+
+function hideContextMenu(e) {
+    if (!elements.contextMenu.contains(e.target)) {
+        elements.contextMenu.classList.add('hidden');
+    }
+}
+
+async function handleContextMenuAction(e) {
+    const item = e.target.closest('.context-menu-item');
+    if (!item) return;
+
+    elements.contextMenu.classList.add('hidden');
+    const action = item.dataset.action;
+
+    switch (action) {
+        case 'mode-positive': setMode(Mode.POSITIVE); break;
+        case 'mode-negative': setMode(Mode.NEGATIVE); break;
+        case 'mode-other': setMode(Mode.OTHER); break;
+        case 'mode-pan': setMode(Mode.PAN); break;
+        case 'select-all': await handleSelectAll(); break;
+        case 'deselect-all': await handleDeselectAll(); break;
+        case 'invert-selection': await handleInvertSelection(); break;
+        case 'change-positive': await handleChangeClass(MarkerClass.POSITIVE); break;
+        case 'change-negative': await handleChangeClass(MarkerClass.NEGATIVE); break;
+        case 'change-other': await handleChangeClass(MarkerClass.OTHER); break;
+        case 'delete-selected': await handleDeleteSelected(); break;
+    }
+}
+
+// ============== Selection Operations ==============
+
+async function handleSelectAll() {
+    if (!isProjectLoaded) return;
+    const result = await eel.select_all()();
+    if (result) {
+        markers = result.markers;
+        render();
+    }
+}
+
+async function handleDeselectAll() {
+    if (!isProjectLoaded) return;
+    const result = await eel.deselect_all()();
+    if (result) {
+        markers = result.markers;
+        render();
+    }
+}
+
+async function handleInvertSelection() {
+    if (!isProjectLoaded) return;
+    const result = await eel.invert_selection()();
+    if (result) {
+        markers = result.markers;
+        render();
+    }
+}
+
+async function handleChangeClass(newClass) {
+    if (!isProjectLoaded) return;
+    const result = await eel.change_selected_class(newClass)();
+    if (result) {
+        markers = result.markers;
+        updateUndoRedoButtons(result.can_undo, result.can_redo);
+        markUnsavedChanges();
+        render();
+        renderOverview();
+        updateCurrentImageListItem();
+    }
+}
+
+async function handleDeleteSelected() {
+    if (!isProjectLoaded) return;
+    const result = await eel.delete_selected()();
+    if (result) {
+        markers = result.markers;
+        updateUndoRedoButtons(result.can_undo, result.can_redo);
+        markUnsavedChanges();
+        render();
+        renderOverview();
+        updateCurrentImageListItem();
+    }
+}
+
+async function selectMarkersInRect(x, y, width, height) {
+    if (!isProjectLoaded) return;
+    const result = await eel.select_markers_in_rect(x, y, width, height)();
+    if (result) {
+        markers = result.markers;
+        render();
+    }
+}
+
+function drawSelectionRect(imgLeft, imgTop) {
+    if (!isSelecting) return;
+
+    const x1 = imgLeft + Math.min(selectionStartX, selectionEndX) * zoom;
+    const y1 = imgTop + Math.min(selectionStartY, selectionEndY) * zoom;
+    const w = Math.abs(selectionEndX - selectionStartX) * zoom;
+    const h = Math.abs(selectionEndY - selectionStartY) * zoom;
+
+    overlayCtx.strokeStyle = '#0078d4';
+    overlayCtx.lineWidth = 2;
+    overlayCtx.setLineDash([5, 5]);
+    overlayCtx.strokeRect(x1, y1, w, h);
+    overlayCtx.setLineDash([]);
+
+    overlayCtx.fillStyle = 'rgba(0, 120, 212, 0.1)';
+    overlayCtx.fillRect(x1, y1, w, h);
 }

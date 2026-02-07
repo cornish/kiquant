@@ -392,10 +392,76 @@ body {
     color: #e0e0e0;
 }
 
-/* Pan & eraser cursor */
+/* Pan, select & eraser cursor */
 #canvas.mode-pan { cursor: grab; }
 #canvas.mode-pan:active, #canvas.panning { cursor: grabbing; }
+#canvas.mode-select { cursor: crosshair; }
 #canvas.mode-eraser { cursor: none; }
+
+/* Context Menu */
+.context-menu {
+    position: fixed;
+    background-color: #2d2d2d;
+    border: 1px solid #505050;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    min-width: 180px;
+    z-index: 2500;
+    padding: 4px 0;
+}
+
+.context-menu.hidden {
+    display: none;
+}
+
+.context-menu-item {
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #e0e0e0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.context-menu-item:hover {
+    background-color: #0078d4;
+}
+
+.context-menu-separator {
+    height: 1px;
+    background-color: #404040;
+    margin: 4px 0;
+}
+
+.menu-icon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    line-height: 14px;
+    text-align: center;
+    border-radius: 2px;
+    font-weight: bold;
+}
+
+.menu-icon.positive {
+    background-color: #4caf50;
+    color: white;
+}
+
+.menu-icon.negative {
+    background-color: #f44336;
+    color: white;
+}
+
+.menu-icon.other {
+    background-color: #2196f3;
+    color: white;
+}
+
+.menu-icon.pan {
+    font-size: 14px;
+}
 
 /* Welcome Message */
 #welcome-message {
