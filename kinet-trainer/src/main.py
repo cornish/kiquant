@@ -699,11 +699,9 @@ def set_default_model(model_id):
 
 def _load_detection_model(model_id):
     """Load a KiNet model for detection. Returns (model, device) or raises."""
-    # Add parent src/detection to path
-    kiquant_detection = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'src', 'detection'
-    )
+    # Add kiQuant's detection module to path
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    kiquant_detection = os.path.join(repo_root, 'src', 'detection')
     if kiquant_detection not in sys.path:
         sys.path.insert(0, kiquant_detection)
 
@@ -726,10 +724,9 @@ def _run_detection_on_field(field_obj, threshold=0.3, min_distance=5):
     from PIL import Image as PILImage
 
     # Use kiQuant's detection module directly
-    kiquant_detection = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'src', 'detection'
-    )
+    # Path: kinet-trainer/src/main.py -> kinet-trainer/src -> kinet-trainer -> repo root -> src/detection
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    kiquant_detection = os.path.join(repo_root, 'src', 'detection')
     if kiquant_detection not in sys.path:
         sys.path.insert(0, kiquant_detection)
 
